@@ -1939,11 +1939,13 @@ Result<AlphaContent> classify_alpha(const Image& image, std::stop_token stop) {
         }
 
         std::unique_lock lock(analysis.mutex);
-        const bool changed = analysis.changed.wait(lock, stop, [&analysis] {
+        const auto analysis_finished = [&analysis] {
             return analysis.value.load(std::memory_order_acquire) !=
                    detail::AlphaAnalysisValue::analyzing;
-        });
-        if (!changed) {
+        };
+        std::stop_callback wake_waiter(stop, [&analysis] { analysis.changed.notify_all(); });
+        analysis.changed.wait(lock, [&] { return stop.stop_requested() || analysis_finished(); });
+        if (!analysis_finished()) {
             return Status::error(ErrorCode::cancelled, "Alpha classification was cancelled.");
         }
     }

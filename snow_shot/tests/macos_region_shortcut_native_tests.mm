@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
     };
     require(manager.addBinding(&overlay, std::move(select)) != 0, "register physical A");
     overlay.show();
-    [NSApp activate];
+    [NSApp activateIgnoringOtherApps:YES];
     overlay.raise();
     overlay.activateWindow();
     overlay.setFocus();

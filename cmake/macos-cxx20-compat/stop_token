@@ -1,0 +1,7 @@
+#pragma once
+
+#if defined(__has_include_next) && __has_include_next(<stop_token>)
+#  include_next <stop_token>
+#else
+#  include <stop_token.hpp>
+#endif

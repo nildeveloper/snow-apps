@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace {
 QSize scaledSelectionPixelSize(const QSize& selection, qreal scale) {
@@ -37,6 +38,44 @@ QSize scaledSelectionPixelSize(const QSize& selection, qreal scale) {
     }
     return QSize(static_cast<int>(pixelWidth), static_cast<int>(pixelHeight));
 }
+#ifdef Q_OS_MACOS
+QRectF macDesktopRect(NSRect rect) {
+    NSScreen* primary = NSScreen.screens.firstObject;
+    if (primary == nil) {
+        return {};
+    }
+    const CGFloat desktopTop = NSMaxY(primary.frame);
+    return {rect.origin.x, desktopTop - NSMaxY(rect), rect.size.width, rect.size.height};
+}
+
+std::optional<uint32_t> macNativeDisplayId(const QScreen& screen) {
+    const QRectF target(screen.geometry());
+    for (NSScreen* native in NSScreen.screens) {
+        if (macDesktopRect(native.frame) != target) {
+            continue;
+        }
+        NSNumber* number = [native.deviceDescription objectForKey:@"NSScreenNumber"];
+        if (number != nil) {
+            return number.unsignedIntValue;
+        }
+    }
+    return std::nullopt;
+}
+
+QScreen* macScreenForDisplayId(uint32_t displayId) {
+    for (QScreen* screen : QGuiApplication::screens()) {
+        if (screen == nullptr) {
+            continue;
+        }
+        const auto nativeId = macNativeDisplayId(*screen);
+        if (nativeId && *nativeId == displayId) {
+            return screen;
+        }
+    }
+    return nullptr;
+}
+#endif
+
 } // namespace
 
 QSize screenshotSelectionRenderedPixelSize(const QSize& selection, qreal scale) {
@@ -355,16 +394,7 @@ void rebuildDisplayGeometry(ScreenshotDisplaySession& displaySession, QPoint& ca
             display.logicalRect = display.capturedLogicalRect;
             display.canvasRect = display.logicalRect.translated(-canvasOrigin);
 #ifdef Q_OS_MACOS
-            display.screen = nullptr;
-            for (QScreen* screen : QGuiApplication::screens()) {
-                auto* native = screen->nativeInterface<QNativeInterface::QCocoaScreen>();
-                if (native &&
-                    [[[native->nativeScreen() deviceDescription] objectForKey:@"NSScreenNumber"]
-                        unsignedIntValue] == display.nativeDisplayId) {
-                    display.screen = screen;
-                    break;
-                }
-            }
+            display.screen = macScreenForDisplayId(display.nativeDisplayId);
 #endif
         } else {
             display.canvasRect = display.physicalRect.translated(-canvasOrigin);
@@ -857,10 +887,8 @@ CapturedDisplayModel ScreenshotGeometryMapper::preCaptureDisplayModel(QScreen& s
 #ifdef Q_OS_MACOS
     // Selection can finish before image acquisition. Use the same display identity
     // and point-based canvas as the captured frame from the start of the session.
-    auto* native = screen.nativeInterface<QNativeInterface::QCocoaScreen>();
-    if (native) {
-        display.nativeDisplayId = [[[native->nativeScreen() deviceDescription]
-            objectForKey:@"NSScreenNumber"] unsignedIntValue];
+    if (const auto nativeDisplayId = macNativeDisplayId(screen)) {
+        display.nativeDisplayId = *nativeDisplayId;
         display.stableId = QStringLiteral("display:%1").arg(display.nativeDisplayId);
         display.capturedLogicalRect = display.logicalRect;
         display.backingScale = screen.devicePixelRatio();

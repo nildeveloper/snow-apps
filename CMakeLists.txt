@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.2)
 
 # Set the deployment target before CMake initializes Apple's compiler flags.
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum supported macOS version.")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum supported macOS version.")
 endif()
 
 if(CMAKE_HOST_WIN32 AND CMAKE_CXX_COMPILER MATCHES "clang-cl")
@@ -72,6 +72,8 @@ include(ProjectWarnings)
 include(SnowWorkspace)
 include(SnowQt)
 include(RustStaticLibrary)
+include(SnowMacOSCxx20Compat)
+snow_configure_macos_cxx20_compat()
 
 option(SNOW_APPS_BUILD_ANT_DESIGN_QT "Build the Ant Design Qt libraries." ON)
 option(SNOW_APPS_BUILD_SNOW_IMAGE "Build the Snow Image library." ON)
@@ -110,8 +112,8 @@ option(
 )
 
 if(APPLE AND SNOW_APPS_BUILD_SNOW_SHOT)
-    if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "15.0")
-        message(FATAL_ERROR "Snow Shot requires CMAKE_OSX_DEPLOYMENT_TARGET >= 15.0")
+    if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "13.0")
+        message(FATAL_ERROR "Snow Shot requires CMAKE_OSX_DEPLOYMENT_TARGET >= 13.0")
     endif()
     if(CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64|x86_64)$")
         message(FATAL_ERROR "Build one Snow Shot architecture at a time: arm64 or x86_64")

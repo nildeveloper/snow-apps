@@ -3,6 +3,42 @@
 use crate::{MacError, MacResult};
 use snow_media::{DynamicRange, PixelFormat};
 
+/// Availability of ScreenCaptureKit API groups that were introduced across
+/// multiple macOS releases. Keep these checks centralized so callers never send
+/// a selector to an older system merely because the Rust binding exposes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiSupport {
+    pub screen_capture_kit: bool,
+    pub system_audio: bool,
+    pub screenshot_manager: bool,
+    pub filter_geometry: bool,
+    pub window_shadow_control: bool,
+    pub native_mouse_clicks: bool,
+    pub hdr_capture: bool,
+}
+
+impl ApiSupport {
+    pub fn current() -> Self {
+        Self::from_levels(
+            crate::permission::os_at_least(13, 0),
+            crate::permission::os_at_least(14, 0),
+            crate::permission::os_at_least(15, 0),
+        )
+    }
+
+    fn from_levels(macos_13: bool, macos_14: bool, macos_15: bool) -> Self {
+        Self {
+            screen_capture_kit: macos_13,
+            system_audio: macos_13,
+            screenshot_manager: macos_14,
+            filter_geometry: macos_14,
+            window_shadow_control: macos_14,
+            native_mouse_clicks: macos_15,
+            hdr_capture: macos_15,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureSupport {
     pub screen_capture_kit: bool,
@@ -11,12 +47,15 @@ pub struct CaptureSupport {
 }
 impl CaptureSupport {
     pub fn current() -> Self {
-        Self::from_host(
-            crate::permission::supported_os(),
-            cfg!(target_arch = "aarch64"),
-            objc2_metal::MTLCreateSystemDefaultDevice().is_some(),
-        )
+        let api = ApiSupport::current();
+        Self {
+            screen_capture_kit: api.screen_capture_kit,
+            metal_composition: api.screen_capture_kit
+                && objc2_metal::MTLCreateSystemDefaultDevice().is_some(),
+            hdr_capture: api.hdr_capture && cfg!(target_arch = "aarch64"),
+        }
     }
+    #[cfg(test)]
     fn from_host(supported_os: bool, apple_silicon: bool, metal: bool) -> Self {
         Self {
             screen_capture_kit: supported_os,
@@ -32,7 +71,7 @@ impl CaptureSupport {
             DynamicRange::Sdr => Ok(PixelFormat::Bgra8),
             DynamicRange::Hdr if self.hdr_capture => Ok(PixelFormat::Rgba16Float),
             DynamicRange::Hdr => Err(MacError::Unsupported(
-                "ScreenCaptureKit canonical HDR requires Apple Silicon".into(),
+                "ScreenCaptureKit canonical HDR requires macOS 15 and Apple Silicon".into(),
             )),
         }
     }
@@ -56,6 +95,30 @@ impl CaptureSupport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_groups_follow_their_macos_release_boundaries() {
+        let macos_13 = ApiSupport::from_levels(true, false, false);
+        assert!(macos_13.screen_capture_kit);
+        assert!(macos_13.system_audio);
+        assert!(!macos_13.screenshot_manager);
+        assert!(!macos_13.filter_geometry);
+        assert!(!macos_13.window_shadow_control);
+        assert!(!macos_13.native_mouse_clicks);
+        assert!(!macos_13.hdr_capture);
+
+        let macos_14 = ApiSupport::from_levels(true, true, false);
+        assert!(macos_14.screenshot_manager);
+        assert!(macos_14.filter_geometry);
+        assert!(macos_14.window_shadow_control);
+        assert!(!macos_14.native_mouse_clicks);
+        assert!(!macos_14.hdr_capture);
+
+        let macos_15 = ApiSupport::from_levels(true, true, true);
+        assert!(macos_15.native_mouse_clicks);
+        assert!(macos_15.hdr_capture);
+    }
+
     #[test]
     fn architecture_os_and_pixel_depth_are_independent_capabilities() {
         let intel = CaptureSupport::from_host(true, false, true);
