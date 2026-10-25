@@ -1,0 +1,304 @@
+name: macOS 13 Compatibility Release
+
+on:
+  push:
+    tags:
+      - "macos13-v*-r*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos13-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate compatibility tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      revision: ${{ steps.meta.outputs.revision }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate tag and source version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^macos13-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)-r([1-9][0-9]*)$ ]]; then
+            echo "Invalid compatibility tag: ${tag}" >&2
+            echo "Expected: macos13-v<upstream-version>-r<revision>, for example macos13-v1.3.9-r1" >&2
+            exit 1
+          fi
+
+          tag_version="${BASH_REMATCH[1]}"
+          revision="${BASH_REMATCH[3]}"
+          source_version="$(sed -nE 's/^set\(SNOW_SHOT_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt)"
+
+          if [[ -z "${source_version}" ]]; then
+            echo "Unable to read SNOW_SHOT_VERSION from CMakeLists.txt" >&2
+            exit 1
+          fi
+          if [[ "${tag_version}" != "${source_version}" ]]; then
+            echo "Tag version ${tag_version} does not match source version ${source_version}" >&2
+            exit 1
+          fi
+
+          if ! grep -Fq 'set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0"' CMakeLists.txt; then
+            echo "Tagged source is not the macOS 13 compatibility build." >&2
+            exit 1
+          fi
+          qt_target="$(python3 -c 'import json; print(json.load(open("scripts/qt-toolchain.json"))["macosQtDeploymentTarget"])')"
+          if [[ "${qt_target}" != "13.0" ]]; then
+            echo "Static Qt deployment target is ${qt_target}, expected 13.0." >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${source_version}"
+            echo "revision=${revision}"
+            echo "release_tag=${tag}"
+          } >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            arch: arm64
+            asset_arch: arm64
+            runner: macos-15
+            preset: snow-shot-macos-arm64-release
+            parallel: 3
+          - name: Intel
+            arch: x64
+            asset_arch: x86_64
+            runner: macos-15-intel
+            preset: snow-shot-macos-x64-release
+            parallel: 4
+    runs-on: ${{ matrix.runner }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      SNOW_QT_PREFIX: ${{ github.workspace }}/.cache/qt-static/${{ matrix.arch }}
+      SNOW_QT_STATIC_DIR: ${{ github.workspace }}/.cache/qt-static/${{ matrix.arch }}/lib/cmake/Qt6
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the Apple compiler toolchain intact. Installing Homebrew's full
+          # LLVM and adding it to PATH can make GN invoke a different clang++
+          # than vcpkg/CMake used to emit LTO bitcode.
+          brew install cmake ninja pkgconf nasm clang-format
+
+          apple_clang="$(xcrun --find clang)"
+          apple_clangxx="$(xcrun --find clang++)"
+          path_clangxx="$(command -v clang++)"
+          printf 'Apple clang: %s\nApple clang++: %s\nPATH clang++: %s\n' \
+            "${apple_clang}" "${apple_clangxx}" "${path_clangxx}"
+          clang-format --version
+
+          if [[ "${path_clangxx}" == */opt/llvm/* ]]; then
+            echo "Refusing mixed Homebrew/Apple LLVM toolchains: ${path_clangxx}" >&2
+            exit 1
+          fi
+
+      - name: Select Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt,clippy
+          rustup default 1.97.1
+          rustc --version
+          cargo --version
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: macos13-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            macos13-${{ matrix.arch }}-cargo-
+
+      - name: Restore vcpkg cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools/macos/installed/static
+            .tools/vcpkg/downloads
+            ~/.cache/vcpkg/archives
+          key: macos13-${{ matrix.arch }}-vcpkg-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/**', 'scripts/bootstrap-macos.sh') }}
+
+      - name: Restore static Qt cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/qt-static/${{ matrix.arch }}
+          key: macos13-${{ matrix.arch }}-qt-${{ hashFiles('scripts/qt-toolchain.json', 'scripts/build-static-qt.sh', 'scripts/validate-static-qt.py', 'vcpkg.json') }}
+
+      - name: Bootstrap release dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/bootstrap-macos.sh "${{ matrix.preset }}" --skip-qt-validation
+
+      - name: Build audited static Qt
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${SNOW_QT_PREFIX}")"
+          scripts/build-static-qt.sh             --arch "${{ matrix.arch }}"             --install-prefix "${SNOW_QT_PREFIX}"             --parallel "${{ matrix.parallel }}"
+
+          test -f "${SNOW_QT_STATIC_DIR}/Qt6Config.cmake"
+
+          # The Qt source/build trees are only temporary inputs. Removing them
+          # leaves more room for the full static Snow Shot package build.
+          find "${TMPDIR:-/tmp}" -maxdepth 1 -type d             \( -name 'qt-build-*' -o -name 'qt-everywhere-src-*' \)             -prune -exec rm -rf -- {} + || true
+          df -h .
+
+      - name: Build and package Snow Shot
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SNOW_QT_STATIC_DIR
+          scripts/package-snow-shot.sh "${{ matrix.preset }}" --parallel "${{ matrix.parallel }}"
+
+      - name: Collect and verify release assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          dist="${RUNNER_TEMP}/release-assets"
+          mkdir -p "${dist}"
+
+          expected=(
+            "snow-shot-${VERSION}-macos-${{ matrix.asset_arch }}.dmg"
+          )
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            expected+=("snow-shot-mini-${VERSION}-macos-arm64.dmg")
+          fi
+
+          for dmg_name in "${expected[@]}"; do
+            dmg="$(find "${GITHUB_WORKSPACE}" -maxdepth 3 -type f -name "${dmg_name}" -print -quit)"
+            if [[ -z "${dmg}" ]]; then
+              echo "Missing package: ${dmg_name}" >&2
+              find "${GITHUB_WORKSPACE}" -maxdepth 3 -type f -name '*.dmg' -print >&2 || true
+              exit 1
+            fi
+            if [[ ! -f "${dmg}.sha256" ]]; then
+              echo "Missing checksum: ${dmg}.sha256" >&2
+              exit 1
+            fi
+
+            cp "${dmg}" "${dmg}.sha256" "${dist}/"
+          done
+
+          cd "${dist}"
+          for checksum in *.sha256; do
+            shasum -a 256 -c "${checksum}"
+          done
+
+          ls -lh
+
+      - name: Upload packaged assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos13-${{ matrix.arch }}
+          path: ${{ runner.temp }}/release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish compatibility release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      REVISION: ${{ needs.validate.outputs.revision }}
+
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos13-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify complete asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected=(
+            "snow-shot-${VERSION}-macos-arm64.dmg"
+            "snow-shot-${VERSION}-macos-arm64.dmg.sha256"
+            "snow-shot-mini-${VERSION}-macos-arm64.dmg"
+            "snow-shot-mini-${VERSION}-macos-arm64.dmg.sha256"
+            "snow-shot-${VERSION}-macos-x86_64.dmg"
+            "snow-shot-${VERSION}-macos-x86_64.dmg.sha256"
+          )
+
+          for name in "${expected[@]}"; do
+            test -f "dist/${name}" || {
+              echo "Missing release asset: ${name}" >&2
+              exit 1
+            }
+          done
+
+          cd dist
+          for checksum in *.sha256; do
+            shasum -a 256 -c "${checksum}"
+          done
+
+      - name: Publish GitHub pre-release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title="Snow Shot ${VERSION} · macOS 13 Compatibility r${REVISION}"
+          cat > release-notes.md <<EOF
+          Compatibility build of Snow Shot ${VERSION} for macOS 13 Ventura and later.
+
+          This release is maintained separately from the upstream release channel.
+
+          - Tag: ${RELEASE_TAG}
+          - Minimum supported system: macOS 13
+          - Architectures: Apple Silicon (arm64) and Intel (x86_64)
+          - Packages are ad-hoc signed by the build pipeline and are not Apple-notarized.
+          - Automatic upstream updates remain disabled in this compatibility build.
+
+          Assets include the DMG packages and matching SHA-256 sidecars. Apple Silicon also includes Snow Shot Mini.
+          EOF
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}"               --repo "${GITHUB_REPOSITORY}"               --title "${title}"               --notes-file release-notes.md               --prerelease
+            gh release upload "${RELEASE_TAG}" dist/*               --repo "${GITHUB_REPOSITORY}"               --clobber
+          else
+            gh release create "${RELEASE_TAG}" dist/*               --repo "${GITHUB_REPOSITORY}"               --verify-tag               --title "${title}"               --notes-file release-notes.md               --prerelease
+          fi
