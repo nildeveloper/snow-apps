@@ -159,6 +159,34 @@ jobs:
           restore-keys: |
             macos13-${{ matrix.arch }}-cargo-
 
+      - name: Prefetch Rust packaging dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # CPack collects Rust notices with cargo metadata/tree in --offline
+          # mode. A normal build may not download every package that metadata
+          # needs to inspect, so warm the exact packaged dependency graphs
+          # before entering the offline packaging phase.
+          manifests=(
+            "snow-crates/Cargo.toml"
+            "snow_rust_ffi/Cargo.toml"
+            "snow_draw_engine_qt/Cargo.toml"
+            "snow_shot/rust/snow-shot-mcp/Cargo.toml"
+          )
+
+          for manifest in "${manifests[@]}"; do
+            lockfile="$(dirname "${manifest}")/Cargo.lock"
+            test -f "${manifest}"
+            test -f "${lockfile}"
+            echo "Prefetching Rust packaging graph: ${manifest}"
+            cargo fetch --locked --manifest-path "${manifest}"
+          done
+
+          # Prove the graph that failed in the previous smoke build is now
+          # complete before spending time on the native application build.
+          cargo metadata             --manifest-path snow-crates/Cargo.toml             --locked             --offline             --format-version 1             >/dev/null
+
       - name: Resolve reusable vcpkg cache
         id: vcpkg-cache-key
         shell: bash
