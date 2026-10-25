@@ -191,16 +191,40 @@ void syncNativeContextMenuBadge(AdContextMenu* menu, QAction* action) {
         if (!native || index < 0 || index >= native.numberOfItems) {
             return;
         }
-        if (@available(macOS 14.0, *)) {
-            NSMenuItem* item = [native itemAtIndex:index];
-            const QString text = menu->actionBadge(action);
-            if (text.isEmpty()) {
-                item.badge = nil;
-            } else if (![item.badge.stringValue isEqualToString:text.toNSString()]) {
-                item.badge =
-                    [[[NSMenuItemBadge alloc] initWithString:text.toNSString()] autorelease];
+        NSMenuItem* item = [native itemAtIndex:index];
+        static const SEL badgeGetter = NSSelectorFromString(@"badge");
+        static const SEL badgeSetter = NSSelectorFromString(@"setBadge:");
+        static const SEL stringValueGetter = NSSelectorFromString(@"stringValue");
+        static const SEL initWithString = NSSelectorFromString(@"initWithString:");
+        Class badgeClass = NSClassFromString(@"NSMenuItemBadge");
+        if (!badgeClass || ![item respondsToSelector:badgeGetter] ||
+            ![item respondsToSelector:badgeSetter]) {
+            return;
+        }
+
+        const auto getObject = reinterpret_cast<id (*)(id, SEL)>(objc_msgSend);
+        const auto setObject = reinterpret_cast<void (*)(id, SEL, id)>(objc_msgSend);
+        const auto initializeBadge = reinterpret_cast<id (*)(id, SEL, id)>(objc_msgSend);
+        id current = getObject(item, badgeGetter);
+        const QString text = menu->actionBadge(action);
+        if (text.isEmpty()) {
+            if (current) {
+                setObject(item, badgeSetter, nil);
+            }
+            return;
+        }
+
+        NSString* value = text.toNSString();
+        if (current && [current respondsToSelector:stringValueGetter]) {
+            NSString* currentValue = static_cast<NSString*>(getObject(current, stringValueGetter));
+            if ([currentValue isEqualToString:value]) {
+                return;
             }
         }
+
+        id badge = initializeBadge([badgeClass alloc], initWithString, value);
+        setObject(item, badgeSetter, badge);
+        [badge release];
     }
 }
 

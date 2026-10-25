@@ -2,7 +2,7 @@
 
 #include <QApplication>
 
-#if defined(Q_OS_MACOS)
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 11, 0)
 #include "detail/window_surface_mac_p.h"
 #include <QAccessible>
 #include <QEvent>
@@ -14,7 +14,7 @@
 #endif
 
 namespace adqt::widgets {
-#if defined(Q_OS_MACOS)
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 11, 0)
 namespace {
 class WidgetAccessibilityRepair final : public QObject {
  public:
@@ -81,7 +81,7 @@ class WidgetAccessibilityRepair final : public QObject {
 #endif
 
 void initializePlatformCompatibility(QApplication& app) {
-#if defined(Q_OS_MACOS)
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 11, 0)
   static QPointer<WidgetAccessibilityRepair> repair;
   if (!repair) {
     repair = new WidgetAccessibilityRepair(app);

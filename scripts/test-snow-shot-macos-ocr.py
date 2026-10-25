@@ -211,7 +211,7 @@ class MacOSOcrAssets(unittest.TestCase):
             if 'otool' in args[0]:
                 self.assertEqual(args[1:3], ('-arch', 'x86_64'))
                 if '-l' in args:
-                    return 'cmd LC_BUILD_VERSION\nminos 15.0'
+                    return 'cmd LC_BUILD_VERSION\nminos 13.0'
                 if '-L' in args:
                     return f'{binary}:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)'
                 return str(binary)
@@ -704,7 +704,7 @@ class MacOSOcrAssets(unittest.TestCase):
         binary = app / 'Contents/MacOS/snow_shot'
         binary.parent.mkdir(parents=True)
         binary.write_bytes(ocr.ARM64_HEADER + bytes(24))
-        state = dict(arch='arm64', minimum='15.0', dependency='/usr/lib/libSystem.B.dylib', rpath='@loader_path/../Frameworks')
+        state = dict(arch='arm64', minimum='13.0', dependency='/usr/lib/libSystem.B.dylib', rpath='@loader_path/../Frameworks')
         def inspect(*args):
             if args[0] == '/usr/bin/codesign' and state.get('signature_failure'):
                 raise subprocess.CalledProcessError(1, args)

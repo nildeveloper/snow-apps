@@ -124,10 +124,11 @@ snow_apply_release_options(ant_design_qt)
 snow_find_qt_private(Gui)
 target_link_libraries(ant_design_qt PRIVATE Qt6::GuiPrivate adqt::native_window)
 if(APPLE)
-    # Qt 6.12.0's source retains QAccessibleCache's private destruction slot and
-    # stale-interface lookup. Keep the repair and review its ABI again on upgrades;
-    # source review does not replace the native macOS accessibility regression.
-    if(NOT Qt6Gui_VERSION VERSION_EQUAL "6.12.0")
+    # Qt 6.11/6.12 can retain a stale QAccessibleCache association. The repair
+    # is intentionally not compiled on Qt 6.10, where this regression does not
+    # apply to the compatibility target. Re-review its private ABI for newer Qt.
+    if(Qt6Gui_VERSION VERSION_GREATER_EQUAL "6.11.0" AND
+       NOT Qt6Gui_VERSION VERSION_EQUAL "6.12.0")
         message(WARNING
             "AdQt macOS accessibility repair's source ABI was reviewed with Qt 6.12.0; "
             "review widgets/platform_compatibility.cpp and run "
@@ -794,13 +795,15 @@ if(ADQT_BUILD_TESTS)
         set_tests_properties(adqt-widget-surface-lifecycle-tests PROPERTIES LABELS "unit;macos")
         set_tests_properties(adqt-widget-surface-lifecycle-native-tests PROPERTIES
             LABELS "unit;macos" RUN_SERIAL TRUE)
-        add_executable(adqt-widget-accessibility-repair-tests
-            packages/ant_design_qt/tests/widget_accessibility_repair_tests.mm)
-        target_link_libraries(adqt-widget-accessibility-repair-tests PRIVATE adqt::widgets Qt6::Widgets)
-        add_test(NAME adqt-widget-accessibility-repair-tests
-            COMMAND adqt-widget-accessibility-repair-tests)
-        set_tests_properties(adqt-widget-accessibility-repair-tests PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        if(Qt6Gui_VERSION VERSION_GREATER_EQUAL "6.11.0")
+            add_executable(adqt-widget-accessibility-repair-tests
+                packages/ant_design_qt/tests/widget_accessibility_repair_tests.mm)
+            target_link_libraries(adqt-widget-accessibility-repair-tests PRIVATE adqt::widgets Qt6::Widgets)
+            add_test(NAME adqt-widget-accessibility-repair-tests
+                COMMAND adqt-widget-accessibility-repair-tests)
+            set_tests_properties(adqt-widget-accessibility-repair-tests PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endif()
     endif()
 
     add_executable(adqt-divider-tests packages/ant_design_qt/tests/tst_divider.cpp)

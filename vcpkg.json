@@ -2,7 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "snow-apps",
   "version-semver": "0.1.0",
-  "dependencies": [],
+  "dependencies": [
+    { "name": "josuttis-jthread", "platform": "osx" }
+  ],
   "overrides": [
     { "name": "flatbuffers", "version": "23.5.26" },
     { "name": "abseil", "version": "20250814.1" },

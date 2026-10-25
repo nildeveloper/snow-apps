@@ -138,7 +138,7 @@ class InstallerTests(unittest.TestCase):
         self.bundle = self.root / 'bundle'
         (self.bundle / 'Contents/MacOS').mkdir(parents=True)
         (self.bundle / 'Contents/Resources/assets/ocr').mkdir(parents=True)
-        self.info = dict(CFBundleIdentifier='com.snowshot.snow_shot', CFBundleExecutable='snow_shot', LSMinimumSystemVersion='15.0')
+        self.info = dict(CFBundleIdentifier='com.snowshot.snow_shot', CFBundleExecutable='snow_shot', LSMinimumSystemVersion='13.0')
         self.write_info()
         self.executable = self.bundle / 'Contents/MacOS/snow_shot'
         self.executable.write_bytes(b'fixture executable')

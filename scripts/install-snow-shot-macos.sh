@@ -35,7 +35,7 @@ message() {
         usage) en='Usage: install-snow-shot-macos.sh [--edition full|mini] [--lang auto|en|zh-CN|zh-TW] [--no-launch] [--dmg PATH] [--prepare-app PATH] [--help]'; cn='用法：install-snow-shot-macos.sh [--edition full|mini] [--lang auto|en|zh-CN|zh-TW] [--no-launch] [--dmg 路径] [--prepare-app 路径] [--help]'; tw='用法：install-snow-shot-macos.sh [--edition full|mini] [--lang auto|en|zh-CN|zh-TW] [--no-launch] [--dmg 路徑] [--prepare-app 路徑] [--help]' ;;
         help) en='Downloads, verifies, locally signs, and installs Snow Shot. --dmg requires PATH.sha256. --prepare-app requires --dmg and a fresh absolute .app path; it stages a signed app without installing or launching. --no-launch skips launching. --lang overrides automatic language selection. First installation requires macOS privacy authorization.'; cn='下载、验证、本地签名并安装 Snow Shot。--dmg 需要对应的 PATH.sha256 文件。--prepare-app 需要 --dmg 和尚不存在的绝对 .app 路径；仅暂存签名后的应用，不安装或启动。--no-launch 跳过启动。--lang 指定界面语言。首次安装需要授予 macOS 隐私权限。'; tw='下載、驗證、本機簽署並安裝 Snow Shot。--dmg 需要對應的 PATH.sha256 檔案。--prepare-app 需要 --dmg 和尚不存在的絕對 .app 路徑；僅暫存簽署後的應用程式，不安裝或啟動。--no-launch 跳過啟動。--lang 指定介面語言。首次安裝需要授予 macOS 隱私權限。' ;;
         arguments) en='Invalid or incomplete option. Run with --help.'; cn='选项无效或不完整。请使用 --help 查看帮助。'; tw='選項無效或不完整。請使用 --help 查看說明。' ;;
-        platform) en='Snow Shot requires macOS 15 or later on Apple Silicon or Intel.'; cn='Snow Shot 需要运行 macOS 15 或更新版本的 Apple Silicon 或 Intel Mac。'; tw='Snow Shot 需要執行 macOS 15 或更新版本的 Apple Silicon 或 Intel Mac。' ;;
+        platform) en='Snow Shot requires macOS 13 or later on Apple Silicon or Intel.'; cn='Snow Shot 需要运行 macOS 13 或更新版本的 Apple Silicon 或 Intel Mac。'; tw='Snow Shot 需要執行 macOS 13 或更新版本的 Apple Silicon 或 Intel Mac。' ;;
         root) en='Run this script as your desktop user, without sudo. Administrator access is requested only when needed.'; cn='请以当前桌面用户运行脚本，不要直接使用 root。仅在需要时请求管理员权限。'; tw='請以目前桌面使用者執行指令碼，不要直接使用 root。僅在需要時請求管理員權限。' ;;
         primary) en='[1/5] Downloading the latest macOS package…'; cn='[1/5] 正在下载最新 macOS 安装包…'; tw='[1/5] 正在下載最新 macOS 安裝套件…' ;;
         fallback) en='Selected download unavailable or invalid; trying the same release on the other channel…'; cn='所选下载源不可用或验证失败，正在从另一渠道获取相同版本…'; tw='所選下載來源無法使用或驗證失敗，正在從另一管道取得相同版本…' ;;
@@ -642,7 +642,7 @@ main() {
         exec sudo -H -u "$SUDO_USER" -- /bin/bash "${BASH_SOURCE[0]}" ${original_args[@]+"${original_args[@]}"}
     fi
     os_version=$(sw_vers -productVersion)
-    version_supported "$os_version" 15 || die platform
+    version_supported "$os_version" 13 || die platform
     detect_architecture || die platform
     [[ "$edition" != mini || "$asset_arch" == arm64 ]] || die platform
     work=$(mktemp -d "${TMPDIR:-/tmp}/snow-shot-installer.XXXXXX")
