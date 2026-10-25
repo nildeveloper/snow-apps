@@ -44,6 +44,15 @@ struct Policy {
     return policy().packageFamily;
 }
 
+[[nodiscard]] inline constexpr bool officialUpdatesAvailable() {
+#if defined(Q_OS_MACOS) && defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) &&               \
+    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 150000
+    return false;
+#else
+    return true;
+#endif
+}
+
 [[nodiscard]] QString localApplicationDataDirectory();
 
 [[nodiscard]] inline QString writableDataDirectory() {

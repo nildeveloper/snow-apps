@@ -158,7 +158,7 @@
         "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg"
       },
       "cacheVariables": {
-        "CMAKE_OSX_DEPLOYMENT_TARGET": "15.0",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/.tools/macos/installed/dynamic",
         "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg-overlay-ports",

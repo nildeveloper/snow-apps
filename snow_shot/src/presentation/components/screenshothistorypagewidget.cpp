@@ -1516,8 +1516,10 @@ void ScreenshotHistoryPageWidget::rebuildEntries() {
             }
         }
     });
-    const auto [firstIndex, lastIndex] =
+    const auto pageRange =
         history_page::pageRange(m_pagination, static_cast<int>(m_filteredRecords.size()));
+    const int firstIndex = pageRange.first;
+    const int lastIndex = pageRange.last;
 
     auto requestUnresolvedAssets = [this, firstIndex, lastIndex]() {
         if (m_dataSource == nullptr || !m_dataSource->supportsAsyncDisplayAssets() ||

@@ -1,5 +1,6 @@
 #include "snow_shot/platform/macos/applicationactivation.h"
 #include "snow_shot/platform/macos/loginitemservice.h"
+#include "appkitcompat_p.h"
 
 #import <AppKit/AppKit.h>
 
@@ -134,7 +135,7 @@ void activateWindow(QWidget* window) {
     static_cast<void>(window->winId());
     NSView* view = reinterpret_cast<NSView*>(window->internalWinId());
     NSWindow* nativeWindow = view.window;
-    [NSApp activate];
+    snow_shot::platform::appkit_compat::activateApplication();
     window->raise();
     window->activateWindow();
     if (QWindow* handle = window->windowHandle()) {

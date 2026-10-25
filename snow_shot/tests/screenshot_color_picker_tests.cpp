@@ -427,7 +427,7 @@ void pickerUsesASeparateClickThroughWindow() {
         const NSInteger overlayLevel = CGWindowLevelForKey(kCGScreenSaverWindowLevelKey);
         ownerWindow.level = overlayLevel;
         nativeWindow.level = overlayLevel + 3;
-        [NSApp activate];
+        [NSApp activateIgnoringOtherApps:YES];
         [ownerWindow orderFrontRegardless];
         [nativeWindow orderFrontRegardless];
         QApplication::processEvents();

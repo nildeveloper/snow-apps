@@ -132,6 +132,9 @@ struct ResizeResourceEstimate final {
                             const char* nameHint);
 [[nodiscard]] QImage decodeFirstFrame(const QByteArray& encoded,
                                       snow::image::Format expectedFormat);
+// Qt 6.12 exposes QImageReader::effectiveSize(). Keep the same semantics on
+// the macOS 13 / Qt 6.10 compatibility build without decoding the raster.
+[[nodiscard]] QSize effectiveReaderSize(QImageReader& reader);
 // Retains Qt's decoding, metadata and transformation behavior while putting
 // the returned raster in managed storage. Compatible readers decode in place.
 [[nodiscard]] QImage readManagedImage(QImageReader& reader);

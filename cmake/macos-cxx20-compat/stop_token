@@ -1,0 +1,6 @@
+#pragma once
+
+// The compatibility include directory shadows <stop_token> only when the
+// jthread fallback is active. Always route that header to the matching
+// josuttis implementation instead of mixing it with libc++ internals.
+#include <stop_token.hpp>

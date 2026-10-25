@@ -43,7 +43,7 @@ tree at `build/patched-x265-4.1`, run:
 x265Source="$PWD/build/patched-x265-4.1"
 cmake -S "$x265Source/source" -B build/x265-neon-private-main10 -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DVERSION=4.1 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DVERSION=4.1 \
   -DENABLE_ASSEMBLY=OFF -DENABLE_ARM_INTRINSICS=ON \
   -DENABLE_NEON_DOTPROD=OFF -DENABLE_NEON_I8MM=OFF -DENABLE_SVE=OFF -DENABLE_SVE2=OFF \
   -DENABLE_CLI=OFF -DENABLE_SHARED=OFF -DENABLE_PIC=ON -DENABLE_LIBNUMA=OFF \
@@ -51,7 +51,7 @@ cmake -S "$x265Source/source" -B build/x265-neon-private-main10 -G Ninja \
 cmake --build build/x265-neon-private-main10 --target x265-static
 cmake -S test-support/x265-arm-intrinsics -B build/x265-neon-combined -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DVERSION=4.1 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DVERSION=4.1 \
   -DSNOW_X265_SOURCE="$x265Source" -DSNOW_X265_HIGH_BIT_DEPTH=OFF \
   -DSNOW_X265_MAIN10_ARCHIVE="$PWD/build/x265-neon-private-main10/libx265.a"
 cmake --build build/x265-neon-combined --target TestBench x265-arm-intrinsics-dispatch-tests

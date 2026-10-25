@@ -91,8 +91,7 @@ LoginItemOperations nativeLoginItemOperations() {
                                 : [SMAppService.mainAppService unregisterAndReturnError:&error];
                     if (success)
                         return {};
-                    if ([error.domain isEqualToString:SMAppServiceErrorDomain] &&
-                        error.code == kSMErrorInvalidSignature)
+                    if (error.code == kSMErrorInvalidSignature)
                         return {false, signatureError()};
                     return {false, text(QT_TRANSLATE_NOOP("LoginItemService",
                                                           "Could not change launch at login: %1"))

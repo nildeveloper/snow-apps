@@ -1,6 +1,6 @@
 # Building Snow Shot on macOS
 
-The app presets target macOS 15 or newer, with separate Apple Silicon (`arm64`)
+The app presets target macOS 13 or newer, with separate Apple Silicon (`arm64`)
 and Intel (`x64`) builds. Each build uses one architecture throughout CMake,
 vcpkg and Cargo; universal builds are not supported by these presets.
 
@@ -332,24 +332,27 @@ or privacy grants.
 
 ## Prerequisites
 
-- Xcode 16+ or Apple Command Line Tools (`xcode-select --install`), with a macOS 15+ SDK.
-  The static Qt builder permits Command Line Tools without full Xcode and retains
-  Qt's SDK version checks.
+- Apple Command Line Tools or Xcode with a C++20 compiler. Ventura's CLT 14.3
+  does not provide libc++ `std::stop_token` / `std::jthread`; the macOS build
+  automatically uses the pinned `josuttis-jthread` vcpkg compatibility headers in
+  that case. Newer Apple libc++ implementations use the native standard-library types.
+  The scripts resolve Clang through `xcrun` and keep the runtime deployment target at 13.0.
 - Rust 1.97.1 or newer installed through rustup. Builds use the active toolchain;
   bootstrap adds its required components and target without selecting an older version.
-- CMake 4.2+, Ninja, pkg-config, Git and Python 3. Intel codec builds also need NASM.
-- The official **Qt 6.12.0 LTS macOS** kit, including Qt SVG and Linguist tools,
-  for Debug and performance builds. Release and fast builds use the repository's
+- CMake 4.2+, Ninja, pkg-config, clang-format, Git and Python 3. Intel codec builds
+  also need NASM.
+- The official **Qt 6.10.3 macOS** kit, including Qt SVG and Linguist tools, for
+  Debug and performance builds. Release and fast builds use the repository's
   audited static Qt build for the selected architecture.
 
 For example, install host tools with `brew install cmake ninja pkgconf nasm`.
 The scripts also recognize tools already installed under `.tools/macos-dev/bin`
 and `.tools/macos-media/host/bin`. They do not modify global tool installations.
 
-Set `Qt6_DIR` if Qt is not at `$HOME/Qt/6.12.0/macos/lib/cmake/Qt6`:
+Set `Qt6_DIR` if Qt is not at `$HOME/Qt/6.10.3/macos/lib/cmake/Qt6`:
 
 ```sh
-export Qt6_DIR=/path/to/Qt/6.12.0/macos/lib/cmake/Qt6
+export Qt6_DIR=/path/to/Qt/6.10.3/macos/lib/cmake/Qt6
 scripts/bootstrap-macos.sh
 scripts/build.sh
 scripts/run-snow-shot.sh

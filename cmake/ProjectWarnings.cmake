@@ -152,12 +152,22 @@ function(snow_apply_release_options target)
             target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:/LTCG>)
         endif()
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options("${target}" PRIVATE
-            $<$<CONFIG:Release>:-flto>
-            $<$<CONFIG:Release>:-ffunction-sections>
-            $<$<CONFIG:Release>:-fdata-sections>
-        )
-        target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:-flto>)
+        # CMake IPO already supplies the compiler/linker LTO flags. Do not add a
+        # second -flto on Apple: old ld64 versions can receive both -flto=thin
+        # and -flto, which is redundant and can destabilize the final link.
+        if(APPLE)
+            target_compile_options("${target}" PRIVATE
+                $<$<CONFIG:Release>:-ffunction-sections>
+                $<$<CONFIG:Release>:-fdata-sections>
+            )
+        else()
+            target_compile_options("${target}" PRIVATE
+                $<$<CONFIG:Release>:-flto>
+                $<$<CONFIG:Release>:-ffunction-sections>
+                $<$<CONFIG:Release>:-fdata-sections>
+            )
+            target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:-flto>)
+        endif()
         if(APPLE AND SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION)
             # Function/data sections alone do not enable the Mach-O linker's
             # dead stripping. Keep it limited to shipping size-optimized builds.

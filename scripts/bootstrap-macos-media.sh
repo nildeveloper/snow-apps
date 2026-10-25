@@ -47,7 +47,7 @@ fi
 if [[ ! -x "$vcpkg_root/vcpkg" ]]; then
   "$vcpkg_root/bootstrap-vcpkg.sh" -disableMetrics
 fi
-MACOSX_DEPLOYMENT_TARGET=15.0 "$vcpkg_root/vcpkg" install --triplet "$triplet" \
+MACOSX_DEPLOYMENT_TARGET=13.0 "$vcpkg_root/vcpkg" install --triplet "$triplet" \
   --x-feature=macos-media --x-no-default-features \
   --overlay-ports="$repo_root/cmake/vcpkg-overlay-ports" \
   --overlay-triplets="$repo_root/cmake/vcpkg-overlay-triplets" \
