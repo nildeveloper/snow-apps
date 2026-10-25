@@ -1,0 +1,553 @@
+name: macOS 13 Compatibility Release
+
+on:
+  push:
+    branches:
+      - feature/macos13-compat
+    tags:
+      - "macos13-v*-r*"
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: macos13-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate compatibility tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      revision: ${{ steps.meta.outputs.revision }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate tag and source version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_version="$(sed -nE 's/^set\(SNOW_SHOT_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt)"
+          if [[ -z "${source_version}" ]]; then
+            echo "Unable to read SNOW_SHOT_VERSION from CMakeLists.txt" >&2
+            exit 1
+          fi
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            if [[ ! "${tag}" =~ ^macos13-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)-r([1-9][0-9]*)$ ]]; then
+              echo "Invalid compatibility tag: ${tag}" >&2
+              echo "Expected: macos13-v<upstream-version>-r<revision>, for example macos13-v1.3.9-r1" >&2
+              exit 1
+            fi
+
+            tag_version="${BASH_REMATCH[1]}"
+            revision="${BASH_REMATCH[3]}"
+            if [[ "${tag_version}" != "${source_version}" ]]; then
+              echo "Tag version ${tag_version} does not match source version ${source_version}" >&2
+              exit 1
+            fi
+            release_tag="${tag}"
+            publish=true
+          else
+            if [[ "${GITHUB_REF_NAME}" != "feature/macos13-compat" ]]; then
+              echo "Unsupported smoke-build branch: ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+            revision=smoke
+            release_tag=
+            publish=false
+            echo "Running full macOS 13 compatibility smoke build; release publishing is disabled."
+          fi
+
+          if ! grep -Fq 'set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0"' CMakeLists.txt; then
+            echo "Tagged source is not the macOS 13 compatibility build." >&2
+            exit 1
+          fi
+          qt_target="$(python3 -c 'import json; print(json.load(open("scripts/qt-toolchain.json"))["macosQtDeploymentTarget"])')"
+          if [[ "${qt_target}" != "13.0" ]]; then
+            echo "Static Qt deployment target is ${qt_target}, expected 13.0." >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${source_version}"
+            echo "revision=${revision}"
+            echo "release_tag=${release_tag}"
+            echo "publish=${publish}"
+          } >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            arch: arm64
+            asset_arch: arm64
+            runner: macos-15
+            preset: snow-shot-macos-arm64-release
+            parallel: 3
+          - name: Intel
+            arch: x64
+            asset_arch: x86_64
+            runner: macos-15-intel
+            preset: snow-shot-macos-x64-release
+            parallel: 4
+    runs-on: ${{ matrix.runner }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      SNOW_QT_PREFIX: ${{ github.workspace }}/.cache/qt-static/${{ matrix.arch }}
+      SNOW_QT_STATIC_DIR: ${{ github.workspace }}/.cache/qt-static/${{ matrix.arch }}/lib/cmake/Qt6
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the Apple compiler toolchain intact. Installing Homebrew's full
+          # LLVM and adding it to PATH can make GN invoke a different clang++
+          # than vcpkg/CMake used to emit LTO bitcode.
+          brew install cmake ninja pkgconf nasm clang-format
+
+          apple_clang="$(xcrun --find clang)"
+          apple_clangxx="$(xcrun --find clang++)"
+          path_clangxx="$(command -v clang++)"
+          printf 'Apple clang: %s\nApple clang++: %s\nPATH clang++: %s\n' \
+            "${apple_clang}" "${apple_clangxx}" "${path_clangxx}"
+          clang-format --version
+
+          if [[ "${path_clangxx}" == */opt/llvm/* ]]; then
+            echo "Refusing mixed Homebrew/Apple LLVM toolchains: ${path_clangxx}" >&2
+            exit 1
+          fi
+
+      - name: Select Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt,clippy
+          rustup default 1.97.1
+          rustc --version
+          cargo --version
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: macos13-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            macos13-${{ matrix.arch }}-cargo-
+
+      - name: Prefetch Rust packaging dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # CPack collects Rust notices with cargo metadata/tree in --offline
+          # mode. A normal build may not download every package that metadata
+          # needs to inspect, so warm the exact packaged dependency graphs
+          # before entering the offline packaging phase.
+          manifests=(
+            "snow-crates/Cargo.toml"
+            "snow_rust_ffi/Cargo.toml"
+            "snow_draw_engine_qt/Cargo.toml"
+            "snow_shot/rust/snow-shot-mcp/Cargo.toml"
+          )
+
+          for manifest in "${manifests[@]}"; do
+            lockfile="$(dirname "${manifest}")/Cargo.lock"
+            test -f "${manifest}"
+            test -f "${lockfile}"
+            echo "Prefetching Rust packaging graph: ${manifest}"
+            cargo fetch --locked --manifest-path "${manifest}"
+          done
+
+          # Prove the graph that failed in the previous smoke build is now
+          # complete before spending time on the native application build.
+          cargo metadata             --manifest-path snow-crates/Cargo.toml             --locked             --offline             --format-version 1             >/dev/null
+
+      - name: Resolve reusable vcpkg cache
+        id: vcpkg-cache-key
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_hash="$(
+            {
+              shasum -a 256 vcpkg.json scripts/bootstrap-macos.sh
+              find cmake/vcpkg-overlay-ports cmake/vcpkg-overlay-triplets -type f -print |
+                LC_ALL=C sort |
+                while IFS= read -r path; do
+                  shasum -a 256 "${path}"
+                done
+            } | shasum -a 256 | awk '{print $1}'
+          )"
+          clang_version="$(xcrun clang --version | head -n 1)"
+          xcode_version="$(xcodebuild -version | tr '\n' ' ')"
+          cmake_version="$(cmake --version | head -n 1)"
+          nasm_version="$(nasm -v)"
+          pkgconf_version="$(pkg-config --version)"
+          deployment_target="$(python3 scripts/validate-static-qt.py --print-macos-deployment-target)"
+
+          cache_fingerprint="$(
+            printf '%s\n'               "${{ matrix.arch }}"               "${source_hash}"               "${clang_version}"               "${xcode_version}"               "${cmake_version}"               "${nasm_version}"               "${pkgconf_version}"               "${deployment_target}" |
+              shasum -a 256 | awk '{print $1}'
+          )"
+          artifact_name="macos13-vcpkg-${{ matrix.arch }}-${cache_fingerprint}"
+
+          echo "artifact_name=${artifact_name}" >> "${GITHUB_OUTPUT}"
+          printf 'vcpkg cache artifact: %s\n' "${artifact_name}"
+
+      - name: Restore reusable vcpkg artifact
+        id: vcpkg-cache
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VCPKG_CACHE_ARTIFACT: ${{ steps.vcpkg-cache-key.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+
+          artifact_id="$(
+            gh api               -H "X-GitHub-Api-Version: 2022-11-28"               "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${VCPKG_CACHE_ARTIFACT}&per_page=100"               --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .id // empty'
+          )"
+
+          if [[ -z "${artifact_id}" ]]; then
+            echo "No reusable vcpkg artifact found."
+            echo "hit=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          cache_dir="${RUNNER_TEMP}/vcpkg-cache"
+          install_root="${GITHUB_WORKSPACE}/.tools/macos/installed/static"
+          rm -rf "${cache_dir}" "${install_root}"
+          mkdir -p "${cache_dir}" "$(dirname "${install_root}")"
+
+          gh api             -H "X-GitHub-Api-Version: 2022-11-28"             "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip"             > "${cache_dir}/artifact.zip"
+          unzip -q "${cache_dir}/artifact.zip" -d "${cache_dir}/artifact"
+
+          archive="${cache_dir}/artifact/${VCPKG_CACHE_ARTIFACT}.tar.gz"
+          test -f "${archive}"
+          tar -xzf "${archive}" -C "$(dirname "${install_root}")"
+          rm -rf "${cache_dir}"
+
+          triplet="${{ matrix.arch }}-osx-snow-shot-static"
+          required=(
+            "${install_root}/${triplet}/include/zlib.h"
+            "${install_root}/${triplet}/include/png.h"
+            "${install_root}/${triplet}/share/zlib/vcpkg_abi_info.txt"
+            "${install_root}/${triplet}/share/libpng/vcpkg_abi_info.txt"
+            "${install_root}/vcpkg/status"
+          )
+          for path in "${required[@]}"; do
+            if [[ ! -f "${path}" ]]; then
+              echo "Cached vcpkg artifact is incomplete: ${path}" >&2
+              rm -rf "${install_root}"
+              echo "hit=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+          done
+
+          echo "Reusing vcpkg install artifact ${VCPKG_CACHE_ARTIFACT}."
+          echo "hit=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Bootstrap release dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/bootstrap-macos.sh "${{ matrix.preset }}" --skip-qt-validation
+
+      - name: Pack reusable vcpkg artifact
+        if: steps.vcpkg-cache.outputs.hit != 'true'
+        shell: bash
+        env:
+          VCPKG_CACHE_ARTIFACT: ${{ steps.vcpkg-cache-key.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          install_root="${GITHUB_WORKSPACE}/.tools/macos/installed/static"
+          archive="${RUNNER_TEMP}/${VCPKG_CACHE_ARTIFACT}.tar.gz"
+          test -f "${install_root}/vcpkg/status"
+          tar -czf "${archive}"             -C "$(dirname "${install_root}")"             "$(basename "${install_root}")"
+          ls -lh "${archive}"
+
+      - name: Publish reusable vcpkg artifact
+        if: steps.vcpkg-cache.outputs.hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vcpkg-cache-key.outputs.artifact_name }}
+          path: ${{ runner.temp }}/${{ steps.vcpkg-cache-key.outputs.artifact_name }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+      - name: Remove packed vcpkg cache archive
+        if: steps.vcpkg-cache.outputs.hit != 'true'
+        shell: bash
+        env:
+          VCPKG_CACHE_ARTIFACT: ${{ steps.vcpkg-cache-key.outputs.artifact_name }}
+        run: rm -f "${RUNNER_TEMP}/${VCPKG_CACHE_ARTIFACT}.tar.gz"
+
+      - name: Resolve reusable static Qt cache
+        id: qt-cache-key
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dependency_prefix="${GITHUB_WORKSPACE}/.tools/macos/installed/static/${{ matrix.arch }}-osx-snow-shot-static"
+          dependency_fingerprint="$(
+            shasum -a 256               "${dependency_prefix}/share/zlib/vcpkg_abi_info.txt"               "${dependency_prefix}/share/libpng/vcpkg_abi_info.txt" |
+              shasum -a 256 | awk '{print $1}'
+          )"
+          policy_hash="$(shasum -a 256 scripts/qt-toolchain.json | awk '{print $1}')"
+          builder_hash="$(
+            shasum -a 256 scripts/build-static-qt.sh scripts/snow-build-environment.sh |
+              shasum -a 256 | awk '{print $1}'
+          )"
+          feature_fingerprint="$(python3 scripts/validate-static-qt.py --print-feature-fingerprint)"
+          clang_version="$(xcrun clang --version | head -n 1)"
+          cmake_version="$(cmake --version | head -n 1)"
+
+          cache_fingerprint="$(
+            printf '%s\n'               "${{ matrix.arch }}"               "${policy_hash}"               "${builder_hash}"               "${feature_fingerprint}"               "${dependency_fingerprint}"               "${clang_version}"               "${cmake_version}" |
+              shasum -a 256 | awk '{print $1}'
+          )"
+          artifact_name="macos13-static-qt-${{ matrix.arch }}-${cache_fingerprint}"
+
+          {
+            echo "artifact_name=${artifact_name}"
+            echo "dependency_fingerprint=${dependency_fingerprint}"
+          } >> "${GITHUB_OUTPUT}"
+
+          printf 'Static Qt cache artifact: %s\n' "${artifact_name}"
+
+      - name: Restore reusable static Qt artifact
+        id: qt-cache
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QT_CACHE_ARTIFACT: ${{ steps.qt-cache-key.outputs.artifact_name }}
+          QT_DEPENDENCY_FINGERPRINT: ${{ steps.qt-cache-key.outputs.dependency_fingerprint }}
+        run: |
+          set -euo pipefail
+
+          artifact_id="$(
+            gh api               -H "X-GitHub-Api-Version: 2022-11-28"               "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${QT_CACHE_ARTIFACT}&per_page=100"               --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .id // empty'
+          )"
+
+          if [[ -z "${artifact_id}" ]]; then
+            echo "No reusable static Qt artifact found."
+            echo "hit=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          cache_dir="${RUNNER_TEMP}/static-qt-cache"
+          rm -rf "${cache_dir}" "${SNOW_QT_PREFIX}"
+          mkdir -p "${cache_dir}" "$(dirname "${SNOW_QT_PREFIX}")"
+
+          gh api             -H "X-GitHub-Api-Version: 2022-11-28"             "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip"             > "${cache_dir}/artifact.zip"
+          unzip -q "${cache_dir}/artifact.zip" -d "${cache_dir}/artifact"
+
+          archive="${cache_dir}/artifact/${QT_CACHE_ARTIFACT}.tar.gz"
+          test -f "${archive}"
+          tar -xzf "${archive}" -C "$(dirname "${SNOW_QT_PREFIX}")"
+          rm -rf "${cache_dir}"
+
+          if python3 scripts/validate-static-qt.py               --prefix "${SNOW_QT_PREFIX}"               --arch "${{ matrix.arch }}"               --dependency-fingerprint "${QT_DEPENDENCY_FINGERPRINT}"; then
+            echo "Reusing validated static Qt artifact ${QT_CACHE_ARTIFACT}."
+            echo "hit=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Cached static Qt artifact failed validation; rebuilding." >&2
+            rm -rf "${SNOW_QT_PREFIX}"
+            echo "hit=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build audited static Qt
+        if: steps.qt-cache.outputs.hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${SNOW_QT_PREFIX}")"
+          scripts/build-static-qt.sh             --arch "${{ matrix.arch }}"             --install-prefix "${SNOW_QT_PREFIX}"             --parallel "${{ matrix.parallel }}"
+
+          test -f "${SNOW_QT_STATIC_DIR}/Qt6Config.cmake"
+
+          # The Qt source/build trees are only temporary inputs. Removing them
+          # leaves more room for the full static Snow Shot package build.
+          find "${TMPDIR:-/tmp}" -maxdepth 1 -type d             \( -name 'qt-build-*' -o -name 'qt-everywhere-src-*' \)             -prune -exec rm -rf -- {} + || true
+          df -h .
+
+      - name: Pack reusable static Qt artifact
+        if: steps.qt-cache.outputs.hit != 'true'
+        shell: bash
+        env:
+          QT_CACHE_ARTIFACT: ${{ steps.qt-cache-key.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/${QT_CACHE_ARTIFACT}.tar.gz"
+          tar -czf "${archive}"             -C "$(dirname "${SNOW_QT_PREFIX}")"             "$(basename "${SNOW_QT_PREFIX}")"
+          ls -lh "${archive}"
+
+      - name: Publish reusable static Qt artifact
+        if: steps.qt-cache.outputs.hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.qt-cache-key.outputs.artifact_name }}
+          path: ${{ runner.temp }}/${{ steps.qt-cache-key.outputs.artifact_name }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+      - name: Remove packed static Qt cache archive
+        if: steps.qt-cache.outputs.hit != 'true'
+        shell: bash
+        env:
+          QT_CACHE_ARTIFACT: ${{ steps.qt-cache-key.outputs.artifact_name }}
+        run: rm -f "${RUNNER_TEMP}/${QT_CACHE_ARTIFACT}.tar.gz"
+
+      - name: Build and package Snow Shot
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SNOW_QT_STATIC_DIR
+          scripts/package-snow-shot.sh "${{ matrix.preset }}" --parallel "${{ matrix.parallel }}"
+
+      - name: Collect and verify release assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          dist="${RUNNER_TEMP}/release-assets"
+          mkdir -p "${dist}"
+
+          expected=(
+            "snow-shot-${VERSION}-macos-${{ matrix.asset_arch }}.dmg"
+          )
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            expected+=("snow-shot-mini-${VERSION}-macos-arm64.dmg")
+          fi
+
+          for dmg_name in "${expected[@]}"; do
+            dmg="$(find "${GITHUB_WORKSPACE}" -maxdepth 3 -type f -name "${dmg_name}" -print -quit)"
+            if [[ -z "${dmg}" ]]; then
+              echo "Missing package: ${dmg_name}" >&2
+              find "${GITHUB_WORKSPACE}" -maxdepth 3 -type f -name '*.dmg' -print >&2 || true
+              exit 1
+            fi
+            if [[ ! -f "${dmg}.sha256" ]]; then
+              echo "Missing checksum: ${dmg}.sha256" >&2
+              exit 1
+            fi
+
+            cp "${dmg}" "${dmg}.sha256" "${dist}/"
+          done
+
+          cd "${dist}"
+          for checksum in *.sha256; do
+            shasum -a 256 -c "${checksum}"
+          done
+
+          ls -lh
+
+      - name: Upload packaged assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos13-${{ matrix.arch }}
+          path: ${{ runner.temp }}/release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish compatibility release
+    if: needs.validate.outputs.publish == 'true'
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      REVISION: ${{ needs.validate.outputs.revision }}
+
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos13-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify complete asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected=(
+            "snow-shot-${VERSION}-macos-arm64.dmg"
+            "snow-shot-${VERSION}-macos-arm64.dmg.sha256"
+            "snow-shot-mini-${VERSION}-macos-arm64.dmg"
+            "snow-shot-mini-${VERSION}-macos-arm64.dmg.sha256"
+            "snow-shot-${VERSION}-macos-x86_64.dmg"
+            "snow-shot-${VERSION}-macos-x86_64.dmg.sha256"
+          )
+
+          for name in "${expected[@]}"; do
+            test -f "dist/${name}" || {
+              echo "Missing release asset: ${name}" >&2
+              exit 1
+            }
+          done
+
+          cd dist
+          for checksum in *.sha256; do
+            shasum -a 256 -c "${checksum}"
+          done
+
+      - name: Publish GitHub pre-release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title="Snow Shot ${VERSION} · macOS 13 Compatibility r${REVISION}"
+          cat > release-notes.md <<EOF
+          Compatibility build of Snow Shot ${VERSION} for macOS 13 Ventura and later.
+
+          This release is maintained separately from the upstream release channel.
+
+          - Tag: ${RELEASE_TAG}
+          - Minimum supported system: macOS 13
+          - Architectures: Apple Silicon (arm64) and Intel (x86_64)
+          - Packages are ad-hoc signed by the build pipeline and are not Apple-notarized.
+          - Automatic upstream updates remain disabled in this compatibility build.
+
+          Assets include the DMG packages and matching SHA-256 sidecars. Apple Silicon also includes Snow Shot Mini.
+          EOF
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}"               --repo "${GITHUB_REPOSITORY}"               --title "${title}"               --notes-file release-notes.md               --prerelease
+            gh release upload "${RELEASE_TAG}" dist/*               --repo "${GITHUB_REPOSITORY}"               --clobber
+          else
+            gh release create "${RELEASE_TAG}" dist/*               --repo "${GITHUB_REPOSITORY}"               --verify-tag               --title "${title}"               --notes-file release-notes.md               --prerelease
+          fi
