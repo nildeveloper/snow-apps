@@ -1,0 +1,81 @@
+name: macOS 13 Compatibility Preflight
+
+on:
+  push:
+    branches:
+      - feature/macos13-compat
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  jthread:
+    name: jthread preflight ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            runner: macos-15
+          - name: Intel
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout compatibility branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prepare pinned jthread headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          include_dir="${RUNNER_TEMP}/jthread/include"
+          mkdir -p "${include_dir}"
+          base="https://raw.githubusercontent.com/josuttis/jthread/3e1908f3bbaba6d2195bb423840c23e107c9e8b2/source"
+          curl -fsSL "${base}/jthread.hpp" -o "${include_dir}/jthread.hpp"
+          curl -fsSL "${base}/stop_token.hpp" -o "${include_dir}/stop_token.hpp"
+          echo "SNOW_PREFLIGHT_JTHREAD_INCLUDE=${include_dir}" >> "${GITHUB_ENV}"
+
+      - name: Compile macOS 13 jthread compatibility probe
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          src="${RUNNER_TEMP}/jthread-probe"
+          build="${RUNNER_TEMP}/jthread-probe-build"
+          mkdir -p "${src}"
+
+          cat > "${src}/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.25)
+          project(snow_jthread_preflight LANGUAGES CXX)
+          set(CMAKE_CXX_STANDARD 20)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          set(CMAKE_CXX_EXTENSIONS OFF)
+          set(SNOW_JTHREAD_BACKPORT_INCLUDE_DIR "$ENV{SNOW_PREFLIGHT_JTHREAD_INCLUDE}" CACHE PATH "" FORCE)
+          list(APPEND CMAKE_MODULE_PATH "$ENV{GITHUB_WORKSPACE}/cmake")
+          include(SnowMacOSCxx20Compat)
+          snow_configure_macos_cxx20_compat()
+          add_executable(jthread_probe main.cpp)
+          CMAKE
+
+          cat > "${src}/main.cpp" <<'CPP'
+          #include <stop_token>
+          #include <thread>
+
+          int main() {
+              std::stop_source source;
+              bool observed = false;
+              std::jthread worker([&](std::stop_token token) {
+                  observed = token.stop_possible();
+              });
+              source.request_stop();
+              worker.join();
+              return observed ? 0 : 1;
+          }
+          CPP
+
+          cmake -S "${src}" -B "${build}"             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0             -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)"
+          cmake --build "${build}" --parallel 2
+          "${build}/jthread_probe"
