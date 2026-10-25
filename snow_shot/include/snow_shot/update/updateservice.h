@@ -39,6 +39,7 @@ class UpdateService final : public QObject {
     Q_OBJECT
   public:
     struct Options {
+        bool enabled = true;
         QString applicationDirectory;
         QString root;
         QString cacheDirectory;

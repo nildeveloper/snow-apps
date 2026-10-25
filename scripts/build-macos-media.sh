@@ -9,7 +9,7 @@ case "$arch" in
   x86_64|x64) target=x86_64-apple-darwin ;;
   *) echo "usage: $0 [arm64|x86_64] [--recording]" >&2; exit 2 ;;
 esac
-export MACOSX_DEPLOYMENT_TARGET=15.0
+export MACOSX_DEPLOYMENT_TARGET=13.0
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 rustup target add "$target"
 packages=(-p snow-capture-c)

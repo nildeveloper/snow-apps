@@ -1562,14 +1562,15 @@ class ExportStop final {
                 return;
             }
             m_poll = std::jthread([this, context, cancelled](std::stop_token stop) {
+                std::stop_callback wake_waiter(stop, [this] { m_condition.notify_all(); });
                 while (!stop.stop_requested()) {
                     if (cancelled(context)) {
                         m_stop.request_stop();
                         return;
                     }
                     std::unique_lock lock(m_mutex);
-                    m_condition.wait_for(lock, stop, std::chrono::milliseconds(10),
-                                         [] { return false; });
+                    m_condition.wait_for(lock, std::chrono::milliseconds(10),
+                                         [&stop] { return stop.stop_requested(); });
                 }
             });
         }
