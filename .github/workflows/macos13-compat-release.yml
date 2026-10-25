@@ -2,6 +2,8 @@ name: macOS 13 Compatibility Release
 
 on:
   push:
+    branches:
+      - feature/macos13-compat
     tags:
       - "macos13-v*-r*"
 
@@ -21,6 +23,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       revision: ${{ steps.meta.outputs.revision }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
+      publish: ${{ steps.meta.outputs.publish }}
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v4
@@ -33,24 +36,37 @@ jobs:
         run: |
           set -euo pipefail
 
-          tag="${GITHUB_REF_NAME}"
-          if [[ ! "${tag}" =~ ^macos13-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)-r([1-9][0-9]*)$ ]]; then
-            echo "Invalid compatibility tag: ${tag}" >&2
-            echo "Expected: macos13-v<upstream-version>-r<revision>, for example macos13-v1.3.9-r1" >&2
-            exit 1
-          fi
-
-          tag_version="${BASH_REMATCH[1]}"
-          revision="${BASH_REMATCH[3]}"
           source_version="$(sed -nE 's/^set\(SNOW_SHOT_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt)"
-
           if [[ -z "${source_version}" ]]; then
             echo "Unable to read SNOW_SHOT_VERSION from CMakeLists.txt" >&2
             exit 1
           fi
-          if [[ "${tag_version}" != "${source_version}" ]]; then
-            echo "Tag version ${tag_version} does not match source version ${source_version}" >&2
-            exit 1
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            if [[ ! "${tag}" =~ ^macos13-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)-r([1-9][0-9]*)$ ]]; then
+              echo "Invalid compatibility tag: ${tag}" >&2
+              echo "Expected: macos13-v<upstream-version>-r<revision>, for example macos13-v1.3.9-r1" >&2
+              exit 1
+            fi
+
+            tag_version="${BASH_REMATCH[1]}"
+            revision="${BASH_REMATCH[3]}"
+            if [[ "${tag_version}" != "${source_version}" ]]; then
+              echo "Tag version ${tag_version} does not match source version ${source_version}" >&2
+              exit 1
+            fi
+            release_tag="${tag}"
+            publish=true
+          else
+            if [[ "${GITHUB_REF_NAME}" != "feature/macos13-compat" ]]; then
+              echo "Unsupported smoke-build branch: ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+            revision=smoke
+            release_tag=
+            publish=false
+            echo "Running full macOS 13 compatibility smoke build; release publishing is disabled."
           fi
 
           if ! grep -Fq 'set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0"' CMakeLists.txt; then
@@ -66,7 +82,8 @@ jobs:
           {
             echo "version=${source_version}"
             echo "revision=${revision}"
-            echo "release_tag=${tag}"
+            echo "release_tag=${release_tag}"
+            echo "publish=${publish}"
           } >> "${GITHUB_OUTPUT}"
 
   build:
@@ -435,6 +452,7 @@ jobs:
 
   release:
     name: Publish compatibility release
+    if: needs.validate.outputs.publish == 'true'
     needs:
       - validate
       - build
