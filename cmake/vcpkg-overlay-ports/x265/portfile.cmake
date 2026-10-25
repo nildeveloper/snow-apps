@@ -1,9 +1,12 @@
-vcpkg_from_bitbucket(
-    OUT_SOURCE_PATH SOURCE_PATH
-    REPO multicoreware/x265_git
-    REF "${VERSION}"
-    SHA512 4b7d71f22f0a7f12ff93f9a01e361df2b80532cd8dac01b5465e63b5d8182f1a05c0289ad95f3aa972c963aa6cd90cb3d594f8b9a96f556a006cf7e1bdd9edda
-    HEAD_REF master
+vcpkg_download_distfile(X265_ARCHIVE
+    URLS "https://github.com/Multicorewareinc/x265/releases/download/${VERSION}/x265_${VERSION}.tar.gz"
+    FILENAME "x265_${VERSION}.tar.gz"
+    SHA512 5af5b958ff507f96a52813a6b72847c9fbc555bf95af287ae7f011055338266fb647dfea3b7789730c7f5c746f7e6cb7d9395ba10cbe43eb5034d3ed99730c3f
+)
+
+vcpkg_extract_source_archive(
+    SOURCE_PATH
+    ARCHIVE "${X265_ARCHIVE}"
     PATCHES
         "${VCPKG_ROOT_DIR}/ports/x265/disable-install-pdb.patch"
         "${VCPKG_ROOT_DIR}/ports/x265/version.patch"

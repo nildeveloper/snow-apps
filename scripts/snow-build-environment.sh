@@ -86,21 +86,35 @@ snow_select_preset() {
     fi
     snow_build_dir="$snow_repo_root/build/$snow_preset"
 }
+snow_setup_apple_compilers() {
+    local detected_c detected_cxx
+    detected_c="$(xcrun --find clang 2>/dev/null)" || snow_die 'Unable to locate the Apple C compiler with xcrun.'
+    detected_cxx="$(xcrun --find clang++ 2>/dev/null)" || snow_die 'Unable to locate the Apple C++ compiler with xcrun.'
+    export CC="${CC:-$detected_c}"
+    export CXX="${CXX:-$detected_cxx}"
+    export MACOSX_DEPLOYMENT_TARGET=13.0
+    if [[ -z "${SDKROOT:-}" ]]; then
+        SDKROOT="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)" ||
+            snow_die 'Unable to locate the macOS SDK with xcrun.'
+        export SDKROOT
+    fi
+
+    if [[ -z "${LIBCLANG_PATH:-}" ]]; then
+        LIBCLANG_PATH="$(cd "$(dirname "$detected_c")/.." && pwd)/lib"
+        export LIBCLANG_PATH
+    fi
+}
+
 snow_setup_tools() {
     export PATH="$snow_repo_root/.tools/macos-dev/bin:$snow_repo_root/.tools/macos-media/host/bin:$PATH"
-    for tool in cmake ninja cargo rustc rustup pkg-config python3; do
+    for tool in cmake ninja cargo rustc rustup pkg-config python3 clang-format; do
         command -v "$tool" >/dev/null || snow_die "Missing $tool. Install the prerequisites listed in docs-macos-build.md."
     done
     snow_require_rust
     snow_require_target_tools "$snow_arch"
+    snow_setup_apple_compilers
     snow_load_qt_policy
-    export MACOSX_DEPLOYMENT_TARGET=15.0
     export CARGO_NET_GIT_FETCH_WITH_CLI=true
-    if [[ -z "${LIBCLANG_PATH:-}" ]]; then
-        LIBCLANG_PATH="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib"
-        [[ -f "$LIBCLANG_PATH/libclang.dylib" ]] || LIBCLANG_PATH="$(xcode-select -p)/usr/lib"
-        export LIBCLANG_PATH
-    fi
     # Release and fast presets mirror Windows by using an audited static Qt kit.
     # Development presets continue to use the official shared kit.
     if [[ "${snow_static_build:-0}" == 1 ]]; then
@@ -130,6 +144,8 @@ snow_cache_aligned() {
     [[ -f "$cache_path" ]] || return 1
     cached_qt="$(sed -n 's/^Qt6_DIR:[^=]*=//p' "$cache_path" | head -n 1)"
     [[ "$cached_qt" == "$snow_qt_dir" ]] &&
+        grep -Fqx "CMAKE_C_COMPILER:FILEPATH=$CC" "$cache_path" &&
+        grep -Fqx "CMAKE_CXX_COMPILER:FILEPATH=$CXX" "$cache_path" &&
         grep -Eq "^VCPKG_TARGET_TRIPLET:.*=$snow_vcpkg_triplet$" "$cache_path" &&
         grep -Fqx "VCPKG_INSTALLED_DIR:PATH=$snow_vcpkg_installed" "$cache_path" &&
         grep -Fqx "CMAKE_HOME_DIRECTORY:INTERNAL=$snow_repo_root" "$cache_path" &&

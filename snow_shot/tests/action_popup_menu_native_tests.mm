@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
                     return menu.data();
                 },
                 snow_shot::presentation::ActionPopupMenu::Placement::TopRight);
-            [NSApp activate];
+            [NSApp activateIgnoringOtherApps:YES];
             owner.show();
             owner.activateWindow();
             require(QTest::qWaitForWindowExposed(&owner), "button owner is exposed");

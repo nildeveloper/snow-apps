@@ -208,7 +208,7 @@ void retainedNativeWindowsDoNotRetainPresentation() {
             surface.repaint();
             NSView* view = reinterpret_cast<NSView*>(surface.internalWinId());
             NSWindow* window = view.window;
-            [NSApp activate];
+            [NSApp activateIgnoringOtherApps:YES];
             [window makeKeyAndOrderFront:nil];
             waitFor(
                 [&] {

@@ -34,7 +34,7 @@ def validate_source(source, version, deployment_target):
     if not match or match[1] != version:
         raise ValueError(f'Qt sources must be qtbase {version}: {metadata}')
     minimum = re.search(r'set\(QT_SUPPORTED_MIN_MACOS_VERSION\s+"([^"]+)"\)', text)
-    if not minimum or not re.fullmatch(r'[1-9]\d*\.\d+(?:\.\d+)?', minimum[1]):
+    if not minimum or not re.fullmatch(r'[1-9]\d*(?:\.\d+){0,2}', minimum[1]):
         raise ValueError(f'The Qt sources must declare their supported macOS runtime floor: {metadata}')
     def version_tuple(value):
         parts = tuple(map(int, value.split('.')))

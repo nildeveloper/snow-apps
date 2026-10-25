@@ -96,6 +96,9 @@ struct ImageEditingExportController::Impl {
     ScreenshotPrintService* printing;
     QPointer<Request> active;
 
+    Impl(ImageEditingExportController& owner, ScreenshotPrintService* printService)
+        : q(owner), printing(printService) {}
+
     void finish(QPointer<Request> request, bool success, QString error = {}) {
         if (!request || active != request)
             return;

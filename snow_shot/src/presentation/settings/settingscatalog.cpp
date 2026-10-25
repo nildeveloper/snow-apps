@@ -5867,7 +5867,7 @@ QStringList SettingsCatalog::validationErrors() const {
 
 SettingsCatalog buildBuiltInSettingsCatalog() {
     auto pages = builtInPages();
-    if (app::distribution::isStoreManaged()) {
+    if (app::distribution::isStoreManaged() || !app::distribution::officialUpdatesAvailable()) {
         for (auto& page : pages) {
             for (auto& section : page.sections)
                 section.items.removeIf([](const SettingsItemDefinition& item) {

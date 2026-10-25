@@ -103,7 +103,10 @@ class Fixture final {
         image.hide();
         toolbar.hide();
         recognition.hide();
-        [NSApp yieldActivationToApplication:previous];
+        const SEL yieldSelector = NSSelectorFromString(@"yieldActivationToApplication:");
+        if ([NSApp respondsToSelector:yieldSelector]) {
+            [NSApp performSelector:yieldSelector withObject:previous];
+        }
         [previous activateWithOptions:0];
         [previous release];
     }
@@ -162,9 +165,7 @@ void familyHoverAndCache(bool enabled) {
     f.hover(f.image);
     f.expect(f.image, QCursor(Qt::IBeamCursor), NSCursor.IBeamCursor);
     f.expect(f.image, QCursor(Qt::OpenHandCursor), NSCursor.openHandCursor);
-    f.expect(f.image, QCursor(Qt::SizeHorCursor),
-             [NSCursor frameResizeCursorFromPosition:NSCursorFrameResizePositionLeft
-                                        inDirections:NSCursorFrameResizeDirectionsAll]);
+    f.expect(f.image, QCursor(Qt::SizeHorCursor), NSCursor.resizeLeftRightCursor);
     require(f.editor->hasFocus(), "toolbar editor must retain focus over the screenshot canvas");
     f.focus(f.recognition);
     f.expect(f.image, QCursor(Qt::CrossCursor), NSCursor.crosshairCursor);

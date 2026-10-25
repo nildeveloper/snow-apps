@@ -140,6 +140,9 @@ python3 "$snow_repo_root/scripts/validate-static-qt.py" --source-dir "$source_di
 mkdir -p "$build_dir"
 (
     cd "$build_dir"
+    # macOS still ships Bash 3.2, where an initialized empty array is
+    # treated as unset under `set -u`. Use the nounset-safe array idiom
+    # so native builds with no extra Apple options pass zero arguments.
     "$source_dir/configure" \
         -static -release -ltcg -system-zlib -system-libpng -no-opengl \
         -opensource -confirm-license -prefix "$install_prefix" \
@@ -161,7 +164,7 @@ mkdir -p "$build_dir"
         -DQT_FEATURE_designer=OFF -DQT_FEATURE_pixeltool=OFF \
         -DQT_FEATURE_qdbus=OFF -DQT_FEATURE_qtattributionsscanner=OFF \
         -DQT_FEATURE_qtdiag=OFF -DQT_FEATURE_qtplugininfo=OFF \
-        "${qt_apple_options[@]}"
+        ${qt_apple_options[@]+"${qt_apple_options[@]}"}
 )
 
 cache="$build_dir/CMakeCache.txt"

@@ -621,9 +621,9 @@ void directImagesPersistWithoutTouchingTheEditor(
                     draft.preparedResultImage->bytes().constData() == png.constData(),
                 "direct capture history did not separate display compression from prepared "
                 "result encoding");
-        for (const auto [setting, expected] : {std::pair{ScreenshotCompressionLevel::Low, 0},
-                                               std::pair{ScreenshotCompressionLevel::Medium, 6},
-                                               std::pair{ScreenshotCompressionLevel::High, 9}}) {
+        for (const auto& [setting, expected] : {std::pair{ScreenshotCompressionLevel::Low, 0},
+                                                std::pair{ScreenshotCompressionLevel::Medium, 6},
+                                                std::pair{ScreenshotCompressionLevel::High, 9}}) {
             request.historyDisplayCompressionLevel = setting;
             require(directCaptureHistoryDraft(request, frame).displayPngCompressionLevel ==
                         expected,

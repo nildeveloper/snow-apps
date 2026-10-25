@@ -144,6 +144,9 @@ impl AudioControlHandle {
     }
 
     /// Publish backend readiness even when a silent endpoint emits no packets.
+    // Rust 1.99 renamed `fetch_update` to `try_update`; keep the former while the
+    // workspace supports Rust 1.97.1, where the replacement is unavailable.
+    #[allow(deprecated)]
     pub fn set_source_status(&self, source: AudioSourceKind, status: AudioSourceStatus) {
         let meter = &self.0.sources[source_index(source)].meter;
         let _ = meter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
@@ -236,6 +239,8 @@ impl AudioControlHandle {
         }
     }
 
+    // See set_source_status: this keeps the Rust 1.97.1 MSRV compatible with newer compilers.
+    #[allow(deprecated)]
     pub(crate) fn publish(&self, source: AudioSourceKind, peak: u16, clipped: bool, at: Instant) {
         if !self.metering_enabled(source) {
             return;

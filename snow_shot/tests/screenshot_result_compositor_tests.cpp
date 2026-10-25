@@ -49,14 +49,14 @@ void persistedStylePreservesQt611Format() {
             "writing a restored style must preserve the existing Qt 6.11 bytes");
     require(!decodeScreenshotResultStyle(extended.left(extended.size() - 1)),
             "truncated persisted geometry must remain rejected after a Qt upgrade");
-    for (const auto [radius, width] :
+    for (const auto& [radius, width] :
          {std::pair{-1, 6}, std::pair{257, 6}, std::pair{12, -1}, std::pair{12, 65}}) {
         const ScreenshotResultStyle invalid{radius, width, Qt::black};
         require(!decodeScreenshotResultStyle(encodeScreenshotResultStyle(invalid)),
                 "persisted styles enforce canvas-unit limits before rendering");
         QByteArray invalidLegacy;
         QDataStream stream(&invalidLegacy, QIODevice::WriteOnly);
-        stream.setVersion(QDataStream::Qt_6_11);
+        stream.setVersion(snow_shot::persistence::kQt611DataStreamVersion);
         stream << invalid.cornerRadius << invalid.shadowWidth << invalid.shadowColor;
         require(!decodeScreenshotResultStyle(invalidLegacy),
                 "legacy persisted styles enforce the same canvas-unit limits");

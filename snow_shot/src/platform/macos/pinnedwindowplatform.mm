@@ -3,6 +3,7 @@
 #include "windowcursorcoordinator.h"
 #include "widgets/detail/native_window_policy_mac_p.h"
 #include "widgets/detail/window_surface_observer.h"
+#include "appkitcompat_p.h"
 
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -272,7 +273,7 @@ class CocoaPinnedWindowPlatform final : public PinnedWindowPlatform {
     bool activate() override {
         if (m_transparent || !attach())
             return false;
-        [NSApp activate];
+        snow_shot::platform::appkit_compat::activateApplication();
         m_window->activateWindow();
         if (QWindow* handle = m_window->windowHandle())
             handle->requestActivate();

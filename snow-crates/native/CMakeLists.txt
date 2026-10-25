@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.27)
 project(snow_media_native LANGUAGES C CXX)
 if(APPLE)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS version" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version" FORCE)
 endif()
 option(SNOW_MEDIA_BUILD_RECORDING "Build FFmpeg recording/export C library" OFF)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/RustStaticLibrary.cmake")

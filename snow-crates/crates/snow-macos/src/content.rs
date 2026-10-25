@@ -11,9 +11,26 @@ use objc2_core_graphics::{
 use objc2_foundation::NSError;
 use objc2_screen_capture_kit::*;
 use snow_media::geometry::{DesktopRect, DesktopSpace, PixelSize};
-use std::ptr::NonNull;
+use std::{ffi::c_void, ptr::NonNull};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGDisplayCopyDisplayMode(display: u32) -> *mut c_void;
+    fn CGDisplayModeGetWidth(mode: *const c_void) -> usize;
+    fn CGDisplayModeGetHeight(mode: *const c_void) -> usize;
+    fn CGDisplayModeGetPixelWidth(mode: *const c_void) -> usize;
+    fn CGDisplayModeGetPixelHeight(mode: *const c_void) -> usize;
+    fn CGDisplayModeRelease(mode: *const c_void);
+}
+
+struct DisplayMode(NonNull<c_void>);
+impl Drop for DisplayMode {
+    fn drop(&mut self) {
+        unsafe { CGDisplayModeRelease(self.0.as_ptr()) };
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct DisplayInfo {
@@ -39,6 +56,59 @@ pub(crate) fn desktop_rect(rect: CGRect) -> DesktopRect {
         y: rect.origin.y,
         width: rect.size.width,
         height: rect.size.height,
+    }
+}
+
+fn display_pixels(id: u32, bounds: DesktopRect) -> MacResult<PixelSize> {
+    let mode = NonNull::new(unsafe { CGDisplayCopyDisplayMode(id) })
+        .map(DisplayMode)
+        .ok_or(MacError::TargetUnavailable)?;
+    let logical_width = unsafe { CGDisplayModeGetWidth(mode.0.as_ptr()) };
+    let logical_height = unsafe { CGDisplayModeGetHeight(mode.0.as_ptr()) };
+    let backing_width = unsafe { CGDisplayModeGetPixelWidth(mode.0.as_ptr()) };
+    let backing_height = unsafe { CGDisplayModeGetPixelHeight(mode.0.as_ptr()) };
+    if logical_width == 0 || logical_height == 0 || backing_width == 0 || backing_height == 0 {
+        return Err(MacError::InvalidConfig("invalid display mode geometry".into()));
+    }
+    let width =
+        (bounds.width * backing_width as f64 / logical_width as f64).round();
+    let height =
+        (bounds.height * backing_height as f64 / logical_height as f64).round();
+    if !width.is_finite()
+        || !height.is_finite()
+        || width < 1.0
+        || height < 1.0
+        || width > u32::MAX as f64
+        || height > u32::MAX as f64
+    {
+        return Err(MacError::InvalidConfig("invalid display pixel geometry".into()));
+    }
+    PixelSize::new(width as u32, height as u32)
+        .map_err(|error| MacError::InvalidConfig(error.to_string()))
+}
+
+fn window_pixels_from_displays(
+    bounds: DesktopRect,
+    displays: &[DisplayInfo],
+) -> Option<PixelSize> {
+    let scale = displays
+        .iter()
+        .filter(|display| {
+            bounds
+                .intersection(display.bounds)
+                .ok()
+                .flatten()
+                .is_some()
+        })
+        .filter_map(|display| {
+            (display.bounds.width > 0.0)
+                .then_some(f64::from(display.pixels.width) / display.bounds.width)
+        })
+        .fold(0.0_f64, f64::max);
+    if scale > 0.0 {
+        bounds.pixels_at_scale(scale).ok()
+    } else {
+        None
     }
 }
 
@@ -261,20 +331,25 @@ pub(crate) fn displays_cancelable(
 }
 pub(crate) fn displays_from(content: &SCShareableContent) -> MacResult<Vec<DisplayInfo>> {
     let primary = CGMainDisplayID();
+    let filter_geometry = crate::capabilities::ApiSupport::current().filter_geometry;
     unsafe {
         content
             .displays()
             .iter()
             .map(|display| {
-                let filter = SCContentFilter::initWithDisplay_excludingWindows(
-                    objc2::AnyThread::alloc(),
-                    &display,
-                    &objc2_foundation::NSArray::new(),
-                );
                 let bounds = desktop_rect(display.frame());
-                let pixels = bounds
-                    .pixels_at_scale(f64::from(filter.pointPixelScale()))
-                    .map_err(|e| MacError::InvalidConfig(e.to_string()))?;
+                let pixels = if filter_geometry {
+                    let filter = SCContentFilter::initWithDisplay_excludingWindows(
+                        objc2::AnyThread::alloc(),
+                        &display,
+                        &objc2_foundation::NSArray::new(),
+                    );
+                    bounds
+                        .pixels_at_scale(f64::from(filter.pointPixelScale()))
+                        .map_err(|e| MacError::InvalidConfig(e.to_string()))?
+                } else {
+                    display_pixels(display.displayID(), bounds)?
+                };
                 Ok(DisplayInfo {
                     id: display.displayID(),
                     bounds,
@@ -285,33 +360,38 @@ pub(crate) fn displays_from(content: &SCShareableContent) -> MacResult<Vec<Displ
             .collect()
     }
 }
-fn window_info(window: &SCWindow) -> WindowInfo {
+fn window_info(window: &SCWindow, displays: &[DisplayInfo]) -> WindowInfo {
     unsafe {
+        let bounds = desktop_rect(window.frame());
+        let pixels = if crate::capabilities::ApiSupport::current().filter_geometry {
+            let filter = SCContentFilter::initWithDesktopIndependentWindow(
+                objc2::AnyThread::alloc(),
+                window,
+            );
+            desktop_rect(filter.contentRect())
+                .pixels_at_scale(f64::from(filter.pointPixelScale()))
+                .ok()
+        } else {
+            window_pixels_from_displays(bounds, displays)
+        };
         WindowInfo {
             id: window.windowID(),
             process_id: window.owningApplication().map_or(0, |app| app.processID()),
             title: window
                 .title()
                 .map_or_else(String::new, |title| title.to_string()),
-            bounds: desktop_rect(window.frame()),
+            bounds,
             on_screen: window.isOnScreen(),
-            pixels: {
-                let filter = SCContentFilter::initWithDesktopIndependentWindow(
-                    objc2::AnyThread::alloc(),
-                    window,
-                );
-                desktop_rect(filter.contentRect())
-                    .pixels_at_scale(f64::from(filter.pointPixelScale()))
-                    .ok()
-            },
+            pixels,
         }
     }
 }
 pub fn windows(timeout: Duration) -> MacResult<Vec<WindowInfo>> {
     let content = shareable_content(timeout)?;
+    let displays = displays_from(&content)?;
     Ok(unsafe { content.windows() }
         .iter()
-        .map(|window| window_info(&window))
+        .map(|window| window_info(&window, &displays))
         .collect())
 }
 /// Inspect only the requested window. The geometry polling hot path must not
@@ -328,10 +408,11 @@ pub(crate) fn window_cancelable(
     window_from(&content, id)
 }
 pub(crate) fn window_from(content: &SCShareableContent, id: u32) -> MacResult<WindowInfo> {
+    let displays = displays_from(content)?;
     unsafe { content.windows() }
         .iter()
         .find(|window| unsafe { window.windowID() == id })
-        .map(|window| window_info(&window))
+        .map(|window| window_info(&window, &displays))
         .ok_or(MacError::TargetUnavailable)
 }
 

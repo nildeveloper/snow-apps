@@ -872,6 +872,17 @@ QImage decodeFirstFrame(const QByteArray& encoded, snow::image::Format expectedF
     return decodeBytes(encoded, expectedFormat, 0, QImage::Format_RGBA8888, true);
 }
 
+QSize effectiveReaderSize(QImageReader& reader) {
+    QSize size = reader.size();
+    if (!size.isValid() || !reader.autoTransform()) {
+        return size;
+    }
+    if (reader.transformation().testFlag(QImageIOHandler::TransformationRotate90)) {
+        size.transpose();
+    }
+    return size;
+}
+
 QImage readManagedImage(QImageReader& reader) {
     const auto fallback = [&reader] {
         QImage image = reader.read();
