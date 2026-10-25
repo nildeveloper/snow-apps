@@ -113,7 +113,7 @@ struct UpdateService::Impl {
     Impl(UpdateService& owner, Options value)
         : q(owner), options(std::move(value)), network(&owner), schedule(&owner), github(&owner),
           gitee(&owner) {
-        status.state = UpdateState::Idle;
+        status.state = options.enabled ? UpdateState::Idle : UpdateState::Unavailable;
         if (options.installedVersion.isEmpty())
             options.installedVersion = QStringLiteral(SNOW_SHOT_VERSION);
         schedule.setSingleShot(true);
@@ -464,12 +464,14 @@ bool UpdateService::busy() const {
     return m_impl->busy();
 }
 void UpdateService::start() {
-    if (m_impl->started)
+    if (!m_impl->options.enabled || m_impl->started)
         return;
     m_impl->started = true;
     m_impl->arm(m_impl->options.startupCheckDelay);
 }
 void UpdateService::setMode(const QString& value) {
+    if (!m_impl->options.enabled)
+        return;
     const QString mode = value == u"download" ? QStringLiteral("check") : value;
     if ((mode != u"manual" && mode != u"check") || mode == m_impl->mode)
         return;
@@ -489,6 +491,11 @@ void UpdateService::setSystemProxy(bool enabled) {
         m_impl->network.setProxy(QNetworkProxy::NoProxy);
 }
 void UpdateService::check(bool manual) {
+    if (!m_impl->options.enabled) {
+        Q_UNUSED(manual)
+        emit operationFinished(QStringLiteral("check"), QStringLiteral("unavailable"));
+        return;
+    }
     m_impl->check(manual);
 }
 void UpdateService::cancel() {

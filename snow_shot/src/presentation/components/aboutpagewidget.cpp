@@ -510,6 +510,11 @@ AboutPageWidget::AboutPageWidget(QWidget* parent, UrlOpener urlOpener,
 
     m_ui->updates =
         updates != nullptr ? updates : qApp->findChild<snow_shot::update::UpdateService*>();
+#ifdef Q_OS_MACOS
+    if (m_ui->updates != nullptr &&
+        m_ui->updates->status().state == snow_shot::update::UpdateState::Unavailable)
+        m_ui->updates = nullptr;
+#endif
     if (m_ui->updates != nullptr) {
         m_ui->updateDivider = new AdDivider(m_ui->versionPanel);
         m_ui->updateDivider->setObjectName(QStringLiteral("aboutUpdateDivider"));

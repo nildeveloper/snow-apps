@@ -92,6 +92,15 @@ class ReleaseOptimizationTests(unittest.TestCase):
                 self.assertEqual(options["Release"][1], "-flto")
                 self.assertEqual(options["Debug"][:2], ["", ""])
 
+    def test_apple_clang_uses_cmake_ipo_without_duplicate_flto_flags(self):
+        options = self.configure(compiler="Clang", apple=True,
+                                 fixture="snow_apply_release_options(probe POLICY size)")
+        compile_options, link_options, ipo = options["Release"][:3]
+        self.assertEqual(compile_options.split(";"),
+                         ["-Os", "-ffunction-sections", "-fdata-sections"])
+        self.assertNotIn("-flto", link_options.split(";"))
+        self.assertEqual(ipo, "TRUE")
+
     def test_msvc_arm64_uses_protected_optimized_native_objects(self):
         for policy in ("speed", "size"):
             for optimization in (True, False):
@@ -213,7 +222,8 @@ endif()
         # unreferenced sections in a shipping size build.
         fixture = "snow_apply_release_options(probe POLICY speed)"
         options = self.configure(compiler="AppleClang", apple=True, fixture=fixture)
-        self.assertEqual(options["Release"][1].split(";"), ["-flto", "LINKER:-dead_strip"])
+        self.assertEqual(options["Release"][1].split(";"), ["LINKER:-dead_strip"])
+        self.assertEqual(options["Release"][2], "TRUE")
         self.assertEqual(options["Debug"][:2], ["", ""])
         for optimization, size in ((True, False), (False, True)):
             with self.subTest(optimization=optimization, size=size):
