@@ -22,7 +22,7 @@ bool macWindowHasShadow(QWidget* widget) {
 }
 
 void macActivateApplication() {
-    [NSApp activate];
+    [NSApp activateIgnoringOtherApps:YES];
 }
 
 void macPostClick(const QPoint& globalPoint) {

@@ -126,7 +126,7 @@ pub(crate) fn native_error(error: MacError) -> ScreenRecorderError {
             ScreenRecorderError::Capture(snow_capture::error::CaptureError::Timeout)
         }
         MacError::UnsupportedOs => {
-            ScreenRecorderError::UnsupportedFeature("macOS 15 or later is required".into())
+            ScreenRecorderError::UnsupportedFeature("macOS 13 or later is required".into())
         }
         MacError::InvalidConfig(message) => ScreenRecorderError::InvalidConfig(message),
         MacError::Unsupported(message) => ScreenRecorderError::UnsupportedFeature(message),

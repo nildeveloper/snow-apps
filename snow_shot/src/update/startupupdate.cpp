@@ -1,5 +1,6 @@
 #include "snow_shot/update/startupupdate.h"
 #include "snow_shot/app/shellimagelaunch.h"
+#include "snow_shot/app/distribution.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -16,6 +17,7 @@ constexpr auto kSkipStartupUpdate = "--skip-startup-update";
 
 UpdateService::Options defaultUpdateServiceOptions() {
     UpdateService::Options options;
+    options.enabled = snow_shot::app::distribution::officialUpdatesAvailable();
     options.applicationDirectory = QCoreApplication::applicationDirPath();
     options.root = QFileInfo(options.applicationDirectory).dir().absolutePath();
     const QString identity = QString::fromLatin1(

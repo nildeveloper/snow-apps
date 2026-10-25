@@ -26,6 +26,17 @@ vcpkg_cmake_configure(
         -DMZ_LIB_SUFFIX=-ng
         -DMZ_ICONV=OFF
         -DMZ_COMPAT=OFF
+        # Snow Shot only reads/writes ordinary Deflate ZIP archives. Disable
+        # minizip-ng's optional backends explicitly; their upstream defaults are
+        # ON and otherwise leak Homebrew xz/zstd/OpenSSL into macOS packages.
+        -DMZ_BZIP2=OFF
+        -DMZ_LZMA=OFF
+        -DMZ_ZSTD=OFF
+        -DMZ_OPENSSL=OFF
+        -DMZ_PKCRYPT=OFF
+        -DMZ_WZAES=OFF
+        -DMZ_LIBBSD=OFF
+        -DMZ_LIBCOMP=OFF
     OPTIONS_RELEASE
         -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
     OPTIONS_DEBUG

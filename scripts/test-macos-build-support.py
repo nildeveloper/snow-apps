@@ -358,15 +358,16 @@ class QtKitValidation(unittest.TestCase):
         source = Path(self.temp.name) / 'Qt source'
         metadata = source / 'qtbase/.cmake.conf'
         metadata.parent.mkdir(parents=True)
-        for minimum in ('14.0', QT_MACOS_DEPLOYMENT_TARGET, QT_MACOS_DEPLOYMENT_TARGET + '.0'):
+        for minimum in ('12', '12.0', QT_MACOS_DEPLOYMENT_TARGET.split('.')[0],
+                        QT_MACOS_DEPLOYMENT_TARGET, QT_MACOS_DEPLOYMENT_TARGET + '.0'):
             with self.subTest(minimum=minimum):
                 metadata.write_text(f'set(QT_REPO_MODULE_VERSION "{QT_VERSION}")\n'
                                     f'set(QT_SUPPORTED_MIN_MACOS_VERSION "{minimum}")\n')
                 self.run_validator('--source-dir', str(source))
         metadata.write_text(f'set(QT_REPO_MODULE_VERSION "{QT_VERSION}")\n'
-                            'set(QT_SUPPORTED_MIN_MACOS_VERSION "15.0")\n')
+                            'set(QT_SUPPORTED_MIN_MACOS_VERSION "14.0")\n')
         result = self.run_validator('--source-dir', str(source), success=False)
-        self.assertIn('Qt sources require macOS 15.0 or newer', result.stderr)
+        self.assertIn('Qt sources require macOS 14.0 or newer', result.stderr)
         for declaration in ('', 'set(QT_SUPPORTED_MIN_MACOS_VERSION "unsupported")\n'):
             with self.subTest(declaration=declaration):
                 metadata.write_text(f'set(QT_REPO_MODULE_VERSION "{QT_VERSION}")\n' + declaration)
@@ -399,6 +400,24 @@ class QtMacOSDeploymentPolicy(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(),
                          [QT_MACOS_DEPLOYMENT_TARGET, QT_VERSION, QT_POLICY['sourceArchiveSha256']])
+
+
+    def test_jthread_fallback_isolates_libcxx_internal_names(self):
+        module = (ROOT / 'cmake/SnowMacOSCxx20Compat.cmake').read_text()
+        compat = ROOT / 'cmake/macos-cxx20-compat'
+        preinclude = (compat / 'preinclude.h').read_text()
+        stop_token = (compat / 'stop_token').read_text()
+
+        self.assertIn('SNOW_MACOS_HAS_NATIVE_JTHREAD', module)
+        self.assertNotIn('-fexperimental-library', module)
+        self.assertIn('__snow_spin_yield', module)
+        self.assertIn('__snow_stop_callback_base', module)
+        self.assertIn('__snow_stop_state', module)
+        self.assertIn('snow-macos-cxx20-compat', module)
+        self.assertIn('#include <jthread.hpp>', preinclude)
+        self.assertNotIn('#include <stop_token>', preinclude)
+        self.assertIn('#include <stop_token.hpp>', stop_token)
+        self.assertNotIn('include_next', stop_token)
 
 
 class QtLicenseMetadata(unittest.TestCase):
@@ -627,7 +646,8 @@ include([==[{(ROOT / 'cmake/SnowShotMiniMacOS.cmake').as_posix()}]==])
                 self.assertTrue(os.access(stage / (product + '.app') / 'Contents/MacOS' / target, os.X_OK))
 
     def test_mini_payload_contains_only_its_helpers_without_models(self):
-        cmake = shutil.which('cmake')
+        cmake = ROOT / '.tools/macos-dev/bin/cmake'
+        cmake = str(cmake) if cmake.is_file() else shutil.which('cmake')
         self.assertIsNotNone(cmake)
         manifest = ROOT / 'snow_shot/packaging/snow-shot-ocr-asset-manifest.json'
         model = next(item for item in json.loads(manifest.read_text())['models']
@@ -998,6 +1018,12 @@ if name == 'sysctl': print(os.environ.get('SNOW_TEST_PHYSICAL_ARM64', '1' if os.
 if name == 'arch' and os.environ.get('FAIL_ROSETTA'): sys.exit(9)
 if name == 'configure': sys.exit(17)
 if name == 'xcode-select': print('/mock Xcode')
+if name == 'xcrun' and sys.argv[1:3] == ['--find', 'clang']:
+    print(pathlib.Path(sys.argv[0]).with_name('clang'))
+if name == 'xcrun' and sys.argv[1:3] == ['--find', 'clang++']:
+    print(pathlib.Path(sys.argv[0]).with_name('clang++'))
+if name == 'xcrun' and sys.argv[1:4] == ['--sdk', 'macosx', '--show-sdk-path']:
+    print('/mock SDK')
 if name == 'git' and 'rev-parse' in sys.argv: print('4497409a47f19db373a410a0efb84eca4747adbf')
 if name == 'cmake' and '--version' in sys.argv: print('cmake version 4.4.3')
 if name in ('rustc', 'rustup'):
@@ -1032,6 +1058,8 @@ if name == 'cmake' and '--preset' in sys.argv and '--build' not in sys.argv:
     installed = root / '.tools/macos/installed' / ('static' if static else 'dynamic')
     entries = [
         f'Qt6_DIR:UNINITIALIZED={os.environ["Qt6_DIR"]}',
+        f'CMAKE_C_COMPILER:FILEPATH={os.environ["CC"]}',
+        f'CMAKE_CXX_COMPILER:FILEPATH={os.environ["CXX"]}',
         f'VCPKG_TARGET_TRIPLET:STRING={triplet}',
         f'VCPKG_INSTALLED_DIR:PATH={installed}',
         f'CMAKE_HOME_DIRECTORY:INTERNAL={root}', 'CMAKE_GENERATOR:INTERNAL=Ninja',
@@ -1081,8 +1109,8 @@ if name == 'openssl':
             pathlib.Path(sys.argv[sys.argv.index(option) + 1]).touch()
 """
         tools = ("cmake", "cpack", "ninja", "cargo", "rustc", "rustup", "pkg-config", "uname",
-                 "open", "ps", "xcode-select", "xcrun", "git", "lsregister", "security",
-                 "openssl", "arch", "sysctl")
+                 "open", "ps", "xcode-select", "xcrun", "clang", "clang++", "clang-format", "git",
+                 "lsregister", "security", "openssl", "arch", "sysctl")
         for name in tools:
             path = self.bin / name
             path.write_text(mock)
@@ -1113,6 +1141,8 @@ if name == 'openssl':
                         SNOW_TEST_LOG=str(self.log),
                         SNOW_TEST_ROOT=str(self.root),
                         SNOW_LAUNCH_SERVICES_REGISTER=str(self.bin / 'lsregister'))
+        self.env.pop('CC', None)
+        self.env.pop('CXX', None)
 
     def run_script(self, script, *args, success=True):
         result = subprocess.run(["/bin/bash", str(self.root / "scripts" / script), *args],
@@ -1164,6 +1194,12 @@ if name == 'openssl':
                      ("--target",), ("--unknown",)):
             calls = self.run_script("build.sh", *args, success=False)
             self.assertFalse(any(c[0] == 'cmake' for c in calls))
+
+    def test_build_requires_clang_format_before_configuring(self):
+        (self.bin / 'clang-format').unlink()
+        calls = self.run_script('build.sh', '--skip-bootstrap', success=False)
+        self.assertIn('Missing clang-format', self.last_result.stderr)
+        self.assertFalse(any(call[0] == 'cmake' and '--preset' in call for call in calls))
 
     def test_bootstrap_selects_matching_rust_target(self):
         self.env['SNOW_TEST_MISSING_RUST_COMPONENT'] = 'rust-std-x86_64-apple-darwin'
@@ -1504,7 +1540,7 @@ if name == 'openssl':
         self.assertIn('if ! xcodebuild -version >/dev/null 2>&1; then', builder)
         self.assertIn('xcrun --show-sdk-path', builder)
         self.assertIn('qt_apple_options+=(-DQT_NO_XCODE_MIN_VERSION_CHECK=ON)', builder)
-        self.assertIn('"${qt_apple_options[@]}"', builder)
+        self.assertIn('${qt_apple_options[@]+"${qt_apple_options[@]}"}', builder)
         self.assertIn('qt_deployment_target="$snow_qt_deployment_target"', builder)
         self.assertIn('-DCMAKE_OSX_DEPLOYMENT_TARGET="$qt_deployment_target"', builder)
         self.assertIn('-DFEATURE_dup3=OFF', builder)

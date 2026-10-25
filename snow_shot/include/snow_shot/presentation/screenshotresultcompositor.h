@@ -5,6 +5,8 @@
 
 #include "snow_shot/image/screenshotselectionbordertype.h"
 
+#include "snow_shot/persistence/qtdatastreamversion.h"
+
 #include <QColor>
 #include <QDataStream>
 #include <QImage>
@@ -48,7 +50,7 @@ inline QByteArray encodeScreenshotResultStyle(const ScreenshotResultStyle& style
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     // These bytes are persisted without a Qt stream-version header. Keep the format used by
     // existing records when upgrading Qt.
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snow_shot::persistence::kQt611DataStreamVersion);
     stream << style.cornerRadius << style.shadowWidth << style.shadowColor;
     const bool hasBorderSettings = style.borderType != ScreenshotSelectionBorderType::Shadow ||
                                    style.borderWidth != 0 || style.borderColor != QColor(Qt::white);
@@ -72,7 +74,7 @@ inline std::optional<ScreenshotResultStyle> decodeScreenshotResultStyle(const QB
     if (bytes.isEmpty())
         return style;
     QDataStream stream(bytes);
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snow_shot::persistence::kQt611DataStreamVersion);
     stream >> style.cornerRadius >> style.shadowWidth >> style.shadowColor;
     if (stream.status() != QDataStream::Ok || style.cornerRadius < 0 || style.cornerRadius > 256 ||
         style.shadowWidth < 0 || style.shadowWidth > 64 || !style.shadowColor.isValid())

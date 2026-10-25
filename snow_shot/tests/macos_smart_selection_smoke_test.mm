@@ -112,7 +112,7 @@ int main(int argc, char** argv) try {
     window.show();
     window.raise();
     window.activateWindow();
-    [NSApp activate];
+    [NSApp activateIgnoringOtherApps:YES];
     const auto fixtureWindowId = snow_shot::platform::captureWindowId(&window);
     require(fixtureWindowId.has_value(), "fixture must expose a CGWindowID");
     bool fixtureIsTarget = false;

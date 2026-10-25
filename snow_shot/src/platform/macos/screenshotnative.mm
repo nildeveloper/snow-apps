@@ -5,6 +5,7 @@
 #include "windowcursorcoordinator.h"
 #include "widgets/detail/native_window_policy_mac_p.h"
 #include "widgets/detail/window_surface_observer.h"
+#include "appkitcompat_p.h"
 #include <QCursor>
 #include <QTimer>
 #include "snow_shot/platform/macos/recapturefocus.h"
@@ -963,7 +964,7 @@ struct RecaptureNativeState {
         if (localTarget) {
             // AX hit testing in our own process can see the overlay instead of
             // the selected window. Native identity avoids that ambiguity entirely.
-            [NSApp activate];
+            snow_shot::platform::appkit_compat::activateApplication();
             [localTarget makeKeyAndOrderFront:nil];
             return true;
         }
@@ -974,7 +975,7 @@ struct RecaptureNativeState {
             AXUIElementSetAttributeValue(application, kAXFocusedWindowAttribute, targetWindow);
         if (raiseError != kAXErrorSuccess || focusError != kAXErrorSuccess)
             return false;
-        [NSApp yieldActivationToApplication:targetApp];
+        snow_shot::platform::appkit_compat::yieldActivationToApplication(targetApp);
         return [targetApp activateWithOptions:0];
     }
 

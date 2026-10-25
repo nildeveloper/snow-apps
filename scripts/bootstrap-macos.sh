@@ -4,7 +4,7 @@ source "$(dirname "$0")/snow-build-environment.sh"
 if [[ "${1:-}" == --help ]]; then
     snow_load_qt_policy
     echo 'Usage: bootstrap-macos.sh [macOS-preset] [--skip-dependency-install] [--skip-qt-validation]'
-    printf 'Requires Xcode command-line tools, Rust (rustup), Qt %s, CMake >= 4.2, Ninja and pkg-config.\n' "$snow_qt_version"
+    printf 'Requires a C++20 Apple toolchain with stop-token support, Rust (rustup), Qt %s, CMake >= 4.2, Ninja, pkg-config and clang-format.\n' "$snow_qt_version"
     exit 0
 fi
 snow_require_macos
@@ -24,10 +24,11 @@ done
 xcrun --find clang >/dev/null
 if [[ "$skip_qt" == 1 ]]; then
     export PATH="$snow_repo_root/.tools/macos-dev/bin:$snow_repo_root/.tools/macos-media/host/bin:$PATH"
-    for tool in cmake ninja cargo rustc rustup pkg-config; do
+    for tool in cmake ninja cargo rustc rustup pkg-config clang-format; do
         command -v "$tool" >/dev/null || snow_die "Missing $tool. Install the prerequisites listed in docs-macos-build.md."
     done
     snow_require_target_tools "$snow_arch"
+    snow_setup_apple_compilers
 else
     snow_setup_tools
 fi

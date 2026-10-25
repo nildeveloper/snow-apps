@@ -18,7 +18,8 @@ def edit(relative, transform):
     updated = transform(original)
     if updated == original:
         raise RuntimeError(f"MicroTeX patch made no change: {relative}")
-    path.write_text(updated, encoding="utf-8", newline="\n")
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(updated)
 
 
 def replace(text, before, after, count=1):
@@ -303,7 +304,8 @@ for folder in ("atom", "box", "core"):
             r"auto\s*\*?\s+(\w+) = new (HBox|VBox|VRowAtom|RowAtom)\(([^\n]*?)\);",
             r"auto \1 = sptrOf<\2>(\3);", original)
         if updated != original:
-            path.write_text(updated, encoding="utf-8", newline="\n")
+            with path.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(updated)
 
 
 def budget_loops(text):
@@ -366,7 +368,8 @@ for folder in ("atom", "box", "core"):
         original = path.read_text(encoding="utf-8")
         updated = budget_loops(original)
         if updated != original:
-            path.write_text(updated, encoding="utf-8", newline="\n")
+            with path.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(updated)
 
 
 def parser_budget(text):

@@ -605,7 +605,8 @@ void builtInCatalogIsCompleteAndValid() {
     require(itemIds.contains(QStringLiteral("pin-to-screen.confirm-before-closing-window")) &&
                 itemIds.contains(QStringLiteral("pin-to-screen.confirm-before-destroying-window")),
             "catalog must retain both independent pinned window confirmation settings");
-    require(foundUpdates, "catalog must contain the update mode item");
+    require(foundUpdates == snow_shot::app::distribution::officialUpdatesAvailable(),
+            "catalog update mode visibility must follow the distribution policy");
     const auto* pinnedEditor =
         catalog.item({QStringLiteral("pinned-windows"), QStringLiteral("pin-to-screen-toolbar"),
                       QStringLiteral("interface.pin-to-screen.pinned-toolbar-editor")});
@@ -3001,9 +3002,14 @@ void searchIndexIsGeneratedAndRanked() {
                 split.first().location.itemId == QStringLiteral("quick.split-selected-images"),
             "selected-image splitting is searchable by its action title");
     const auto updates = index.search(QStringLiteral("Software updates"));
-    require(!updates.isEmpty() &&
-                updates.constFirst().location.itemId == QStringLiteral("updates.mode"),
-            "update policy is directly discoverable through settings search");
+    if (snow_shot::app::distribution::officialUpdatesAvailable()) {
+        require(!updates.isEmpty() &&
+                    updates.constFirst().location.itemId == QStringLiteral("updates.mode"),
+                "update policy is directly discoverable through settings search");
+    } else {
+        require(updates.isEmpty(),
+                "compatibility builds must hide unsupported official update controls");
+    }
 #ifndef Q_OS_MACOS
     const auto nextLaunchUpdates = index.search(QStringLiteral("Auto-update on next launch"));
     require(!nextLaunchUpdates.isEmpty() &&

@@ -169,11 +169,8 @@ pub(crate) fn prepare_with(
             "frame rate must be 1..=240 and timeout nonzero".into(),
         ));
     }
-    if options.dynamic_range == DynamicRange::Hdr && !cfg!(target_arch = "aarch64") {
-        return Err(MacError::Unsupported(
-            "ScreenCaptureKit HDR requires Apple Silicon".into(),
-        ));
-    }
+    let api_support = crate::capabilities::ApiSupport::current();
+    crate::capabilities::CaptureSupport::current().native_format(options.dynamic_range)?;
     unsafe {
         let filter = match options.target {
             Target::Display(id) => {
@@ -222,8 +219,33 @@ pub(crate) fn prepare_with(
                 SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window)
             }
         };
-        let scale = f64::from(filter.pointPixelScale());
-        let mut bounds = desktop_rect(filter.contentRect());
+        let (scale, mut bounds) = if api_support.filter_geometry {
+            (
+                f64::from(filter.pointPixelScale()),
+                desktop_rect(filter.contentRect()),
+            )
+        } else {
+            match options.target {
+                Target::Display(id) => {
+                    let display = crate::content::displays_from(content)?
+                        .into_iter()
+                        .find(|display| display.id == id)
+                        .ok_or(MacError::TargetUnavailable)?;
+                    (
+                        f64::from(display.pixels.width) / display.bounds.width,
+                        display.bounds,
+                    )
+                }
+                Target::Window(id) => {
+                    let window = crate::content::window_from(content, id)?;
+                    let pixels = window.pixels.ok_or(MacError::TargetUnavailable)?;
+                    (
+                        f64::from(pixels.width) / window.bounds.width,
+                        window.bounds,
+                    )
+                }
+            }
+        };
         if let Some(source) = options.source {
             source
                 .validate()
@@ -257,8 +279,12 @@ pub(crate) fn prepare_with(
         config.setHeight(output.height as usize);
         config.setQueueDepth(3);
         config.setShowsCursor(options.cursor == CursorMode::Embedded);
-        config.setShowMouseClicks(false);
-        config.setIgnoreShadowsSingleWindow(true);
+        if api_support.native_mouse_clicks {
+            config.setShowMouseClicks(false);
+        }
+        if api_support.window_shadow_control {
+            config.setIgnoreShadowsSingleWindow(true);
+        }
         config.setScalesToFit(true);
         config.setMinimumFrameInterval(CMTime {
             value: 1,
@@ -268,6 +294,8 @@ pub(crate) fn prepare_with(
         });
         let mut color = ColorDescription::SRGB;
         if options.dynamic_range == DynamicRange::Hdr {
+            // native_format() above guarantees this branch is only reachable on
+            // macOS 15+ Apple Silicon before sending the 15-only selector.
             config.setCaptureDynamicRange(SCCaptureDynamicRange::HDRCanonicalDisplay);
             config.setPixelFormat(kCVPixelFormatType_64RGBAHalf);
             config.setColorSpaceName(kCGColorSpaceExtendedLinearSRGB);
@@ -315,6 +343,21 @@ pub(crate) fn screenshot_with(
     content: &objc2_screen_capture_kit::SCShareableContent,
 ) -> MacResult<NativeFrame> {
     let deadline = crate::deadline::Deadline::new(options.timeout)?;
+    if !crate::capabilities::ApiSupport::current().screenshot_manager {
+        // SCScreenshotManager was introduced in macOS 14. On macOS 13 reuse the
+        // already-supported SCStream path and return its first complete frame.
+        let mut stream = VideoStream::start_with(options, Some(content))?;
+        let frame = loop {
+            match stream.next_frame(deadline.remaining()?) {
+                Err(MacError::Inactive) => continue,
+                result => break result,
+            }
+        };
+        // A captured frame remains valid independently of the stream. Stopping is
+        // best-effort here; the stream's Drop path retains the same bounded cleanup.
+        let _ = stream.stop();
+        return frame;
+    }
     let prepared = prepare_with(options, content)?;
     let (tx, rx) = crossbeam_channel::bounded(1);
     let color = prepared.color;

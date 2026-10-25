@@ -400,8 +400,8 @@ def verify_bundle(app, arch='arm64'):
                 rpaths.append(loads[i + 2].strip().split(' (offset')[0].removeprefix('path '))
             if line.strip().startswith('minos '):
                 minimum = tuple(int(part) for part in line.split()[1].split('.'))
-                if minimum > (15, 0, 0)[:len(minimum)]:
-                    raise ValueError(f'Bundle dependency requires newer than macOS 15: {path}')
+                if minimum > (13, 0, 0)[:len(minimum)]:
+                    raise ValueError(f'Bundle dependency requires newer than macOS 13: {path}')
         def expand(value):
             return Path(value.replace('@loader_path', str(path.parent))
                         .replace('@executable_path', str(executable_root)))
