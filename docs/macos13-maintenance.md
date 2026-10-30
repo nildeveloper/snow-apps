@@ -34,11 +34,13 @@
      MacOSBuildScripts.test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging -v
    ```
 
-4. 合入前，手动运行现有 `macOS 13 Compatibility Release` 工作流，选择当前
-   `fix/macos13-*` 修复分支，验证该提交的完整构建和打包；也可选择
-   `feature/macos13-compat` 验证合入后的维护分支。两种分支路径均强制 `publish=false`，
-   仅兼容版 tag 路径允许发布。确认运行记录中的提交 SHA 与待验证提交一致。
-5. ARM64 和 Intel 都完成后，再验证实际启动、截图、多屏选区和贴图；确认后才创建发布 tag。
+4. 日常 push 只运行轻量 Preflight，不额外跑完整 smoke。发版时核对源版本、
+   远端 HEAD 和未占用的 `macos13-v<version>-r<revision>`，再创建 tag。
+   完整双架构编译、打包和 Release 都由该 tag 工作流完成；分支手动 dispatch 被拒绝。
+   重试已有 tag 只验证该 tag 的固定提交，不允许覆盖 tag 指向。
+5. 工作流仅在 ARM64 和 Intel 构建、打包和校验都成功后发布。确认运行记录中的 SHA
+   与 tag 一致，核对 Full ARM64、Mini ARM64、Full Intel 三个包及校验文件。
+   CI 不能替代 Ventura 真机启动、截图、多屏选区和贴图验证；发布说明须明确该限制。
 
 不要把重跑旧 tag 当作验证新代码。不要以 Preflight 绿色替代整包构建成功。
 不运行无筛选的全量 CTest 或 Rust workspace 测试。
@@ -56,4 +58,4 @@ macOS runner 额外使用真实 SDK、macOS 13 部署目标和 Qt 类型替身�
 Linux 明确跳过该 SDK 检查。它验证语法与 API 可用性，不验证 Qt ABI、实际显示器匹配或系统运行兼容性。
 
 Preflight 覆盖兼容分支、`fix/macos13-*` 修复分支以及目标为兼容分支的 PR，
-不发布 Release，也不构建完整应用。全量原生构建仍使用现有手动工作流，不重复维护第二套打包流程。
+不发布 Release，也不构建完整应用。全量原生构建仅使用兼容版 tag 工作流，不重复维护第二套打包流程。

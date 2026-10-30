@@ -143,7 +143,7 @@ endif()
 function(_snow_add_mini_helpers)
     # Cargo features and build-script identity change these executables. Separate
     # output roots avoid races and accidentally staging the other edition.
-    set(SNOW_RUST_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo-mini")
+    snow_shot_mini_cargo_target_directory(SNOW_RUST_CARGO_TARGET_DIR)
     if(NOT APPLE)
         snow_add_rust_executable(snow-shot-mini-updater-binary
             PACKAGE snow-shot-updater MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rust/snow-shot-updater"

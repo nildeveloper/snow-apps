@@ -47,9 +47,17 @@ function(snow_configure_macos_cxx20_compat)
         _snow_stop_token_header "${_snow_stop_token_header}")
     string(REPLACE "__stop_state" "__snow_stop_state"
         _snow_stop_token_header "${_snow_stop_token_header}")
-    file(WRITE
-        "${_snow_generated_dir}/stop_token.hpp"
-        "${_snow_stop_token_header}")
+    # This header reaches every C++ target through the forced preinclude. Do
+    # not refresh its timestamp on a no-op configure and invalidate all objects.
+    set(_snow_previous_stop_token_header "")
+    if(EXISTS "${_snow_generated_dir}/stop_token.hpp")
+        file(READ "${_snow_generated_dir}/stop_token.hpp" _snow_previous_stop_token_header)
+    endif()
+    if(NOT EXISTS "${_snow_generated_dir}/stop_token.hpp" OR
+       NOT _snow_previous_stop_token_header STREQUAL _snow_stop_token_header)
+        file(WRITE "${_snow_generated_dir}/stop_token.hpp" "${_snow_stop_token_header}")
+    endif()
+    unset(_snow_previous_stop_token_header)
     configure_file(
         "${SNOW_JTHREAD_BACKPORT_INCLUDE_DIR}/jthread.hpp"
         "${_snow_generated_dir}/jthread.hpp"

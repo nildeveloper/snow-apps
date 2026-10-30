@@ -385,7 +385,91 @@ class QtKitValidation(unittest.TestCase):
         self.assertIn('SHA-256 mismatch', result.stderr)
 
 
+@unittest.skipUnless(shutil.which('cmake'), 'CMake is required for Mini cache checks')
+class MiniCargoCachePolicy(unittest.TestCase):
+    def configure(self, mini=None, success=True):
+        with tempfile.TemporaryDirectory(prefix='snow mini cargo ') as temporary:
+            root = Path(temporary)
+            build = root / 'build'
+            full = root / 'external cargo'
+            options = []
+            if mini is not None:
+                selected = mini(root, full)
+                options.append('-DSNOW_SHOT_MINI_CARGO_TARGET_DIR:PATH=' + str(selected))
+            (root / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 3.25)
+project(mini_cargo_fixture NONE)
+include("{(ROOT / 'cmake/SnowShotMiniBuildContract.cmake').as_posix()}")
+set(SNOW_RUST_CARGO_TARGET_DIR "{full.as_posix()}")
+function(mini_scope)
+    snow_shot_mini_cargo_target_directory(SNOW_RUST_CARGO_TARGET_DIR)
+    file(WRITE "${{CMAKE_BINARY_DIR}}/selected.txt" "${{SNOW_RUST_CARGO_TARGET_DIR}}")
+endfunction()
+mini_scope()
+if(NOT SNOW_RUST_CARGO_TARGET_DIR STREQUAL "{full.as_posix()}")
+    message(FATAL_ERROR "Mini path changed Full's target directory")
+endif()
+''')
+            result = subprocess.run(['cmake', '-S', str(root), '-B', str(build), *options],
+                                    text=True, capture_output=True, timeout=30)
+            self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+            if success:
+                expected = build / 'cargo-mini' if mini is None else selected.resolve()
+                self.assertEqual((build / 'selected.txt').read_text(), expected.as_posix())
+            else:
+                self.assertIn('must be different', result.stderr)
+
+    def test_default_remains_local_and_does_not_change_full(self):
+        self.configure()
+
+    def test_external_mini_cache_remains_separate_from_full(self):
+        self.configure(lambda root, full: full / 'mini')
+
+    def test_same_directory_and_normalized_alias_are_rejected(self):
+        for suffix in ('', '/unused/..'):
+            with self.subTest(suffix=suffix):
+                self.configure(lambda root, full: str(full) + suffix, success=False)
+
+
 class QtMacOSDeploymentPolicy(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('cmake'), 'CMake is required for generated-header checks')
+    def test_jthread_generated_header_changes_only_when_content_changes(self):
+        with tempfile.TemporaryDirectory(prefix='snow compat header ') as temporary:
+            root = Path(temporary)
+            headers = root / 'include'
+            headers.mkdir()
+            source = headers / 'stop_token.hpp'
+            source.write_text('// __stop_state fixture\n')
+            (headers / 'jthread.hpp').write_text('// jthread fixture\n')
+            (root / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 3.25)
+project(compat_header_fixture NONE)
+set(APPLE TRUE)
+set(SNOW_MACOS_HAS_NATIVE_JTHREAD FALSE CACHE INTERNAL "" FORCE)
+set(SNOW_JTHREAD_BACKPORT_INCLUDE_DIR "{headers.as_posix()}" CACHE PATH "")
+include("{(ROOT / 'cmake/SnowMacOSCxx20Compat.cmake').as_posix()}")
+snow_configure_macos_cxx20_compat()
+''')
+
+            def configure():
+                result = subprocess.run(['cmake', '-S', str(root), '-B', str(root / 'build')],
+                                        text=True, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            configure()
+            output = root / 'build/snow-macos-cxx20-compat/stop_token.hpp'
+            self.assertEqual(output.read_text(), '// __snow_stop_state fixture\n')
+            # Use a known old timestamp, not sleeps or filesystem clock precision.
+            os.utime(output, (946684800, 946684800))
+            before = output.stat().st_mtime_ns
+            configure()
+            self.assertEqual(output.stat().st_mtime_ns, before,
+                             'a no-op configure must not invalidate all C++ objects')
+            source.write_text('// __stop_state changed\n')
+            configure()
+            self.assertEqual(output.read_text(), '// __snow_stop_state changed\n')
+            self.assertNotEqual(output.stat().st_mtime_ns, before)
+
     def test_shell_loader_exports_the_audited_qt_target(self):
         bash = bash_executable()
         if not bash:
@@ -1553,7 +1637,7 @@ if name == 'openssl':
         ccache.write_text('#!/bin/bash\nexit 0\n')
         ccache.chmod(0o755)
         external = self.root / '.cache/macos13-compile/arm64'
-        compiled = external / 'cargo-target/retained.rlib'
+        compiled = external / 'cargo-target/full/retained.rlib'
         compiled.parent.mkdir(parents=True)
         compiled.write_bytes(b'reuse this output')
         stale = self.root / 'build/snow-shot-macos-arm64-release/stale-output'
@@ -1568,7 +1652,8 @@ if name == 'openssl':
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         configure = next(call for call in calls if call[0] == 'cmake'
                          and '--preset' in call and '--build' not in call)
-        self.assertIn(f'-DSNOW_RUST_CARGO_TARGET_DIR:PATH={external}/cargo-target', configure)
+        self.assertIn(f'-DSNOW_RUST_CARGO_TARGET_DIR:PATH={external}/cargo-target/full', configure)
+        self.assertIn(f'-DSNOW_SHOT_MINI_CARGO_TARGET_DIR:PATH={external}/cargo-target/mini', configure)
         for language in ('C', 'CXX', 'OBJCXX'):
             self.assertIn(f'-DCMAKE_{language}_COMPILER_LAUNCHER=ccache', configure)
         self.assertIn('-DCMAKE_CXX_FLAGS:STRING=-Xclang -fno-pch-timestamp', configure)

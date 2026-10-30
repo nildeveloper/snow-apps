@@ -1,6 +1,7 @@
 """Focused cache transport and release artifact isolation regression tests."""
 
 import json
+import fnmatch
 import os
 from pathlib import Path
 import re
@@ -58,7 +59,9 @@ class CompilationCache(unittest.TestCase):
 
     def test_round_trip_preserves_compiler_outputs_and_excludes_credentials(self):
         self.run_cache('restore')
-        files = {'cargo-target/release/deps/library.rlib': b'compiled dependency',
+        files = {'cargo-target/full/release/deps/library.rlib': b'compiled dependency',
+                 'cargo-target/mini/release/helper': b'isolated Mini helper',
+                 'cargo-target/tests/debug/deps/test': b'isolated native test',
                  'ccache/a/b/object': b'compiled C++',
                  'cargo-home/registry/src/example/lib.rs': b'source code',
                  'cargo-home/git/checkouts/dependency/source.rs': b'git source'}
@@ -105,6 +108,66 @@ class CompilationCache(unittest.TestCase):
         self.assertNotIn('Restored compilation cache', result.stdout)
 
 
+class CompilationIdentity(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = (ROOT / '.github/workflows/macos13-compat-release.yml').read_text()
+        step = cls.workflow.split('      - name: Resolve compilation cache identity\n', 1)[1]
+        step = step.split('\n      - name:', 1)[0]
+        cls.command = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        cls.patterns = re.findall(r"'([^']+)'", step.split('NATIVE_ABI_HASH: ', 1)[1]
+                                 .split('\n', 1)[0])
+
+    def test_source_and_document_changes_do_not_discard_all_compiler_outputs(self):
+        for path in ('snow-crates/Cargo.lock', 'snow-crates/crates/snow-macos/Cargo.toml',
+                     'snow_shot/CMakeLists.txt', 'cmake/ocr/README.md'):
+            self.assertFalse(any(fnmatch.fnmatchcase(path, pattern) for pattern in self.patterns), path)
+        for path in ('scripts/qt-toolchain.json', 'scripts/bootstrap-macos.sh',
+                     'scripts/build-static-qt.sh', 'vcpkg.json', 'CMakePresets.json',
+                     'cmake/ocr/macos13-metal-tt.patch', 'cmake/RustStaticLibrary.cmake',
+                     'cmake/vcpkg-overlay-triplets/arm64-osx-snow-shot-static.cmake'):
+            self.assertTrue(any(fnmatch.fnmatchcase(path, pattern) for pattern in self.patterns), path)
+
+    def test_architecture_native_abi_and_toolchain_remain_isolated(self):
+        with tempfile.TemporaryDirectory(prefix='snow cache identity ') as temporary:
+            root = Path(temporary)
+            for name in ('xcrun', 'xcodebuild', 'rustc', 'cmake', 'ccache'):
+                tool = root / name
+                tool.write_text('#!/bin/bash\nprintf "%s\\n" "$TEST_TOOLCHAIN_VERSION"\n')
+                tool.chmod(0o755)
+            def identity(arch='arm64', native_abi='abi-one', toolchain='tools-one'):
+                output = root / 'output'
+                output.unlink(missing_ok=True)
+                command = self.command.replace('${{ matrix.arch }}', arch).replace(
+                    '${{ matrix.preset }}', 'snow-shot-macos-' + arch + '-release')
+                environment = dict(os.environ, NATIVE_ABI_HASH=native_abi,
+                                   TEST_TOOLCHAIN_VERSION=toolchain, GITHUB_OUTPUT=str(output),
+                                   PATH=str(root) + os.pathsep + os.environ['PATH'])
+                result = subprocess.run(['bash', '-c', command], env=environment,
+                                        text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return output.read_text()
+            initial = identity()
+            self.assertEqual(initial, identity())
+            self.assertNotEqual(initial, identity(arch='x64'))
+            self.assertNotEqual(initial, identity(native_abi='abi-two'))
+            self.assertNotEqual(initial, identity(toolchain='tools-two'))
+
+    def test_full_mini_and_native_tests_have_separate_persistent_roots(self):
+        self.assertIn('cargo-target/full', self.workflow)
+        self.assertIn('cargo-target/mini', self.workflow)
+        self.assertIn('CARGO_TARGET_DIR: ${{ env.SNOW_COMPILE_CACHE_ROOT }}/cargo-target/tests',
+                      self.workflow)
+
+    def test_only_tags_trigger_the_full_build_on_push(self):
+        trigger = self.workflow.split('\npermissions:', 1)[0]
+        self.assertRegex(trigger, r'push:\n\s+tags:\n\s+- "macos13-v\*-r\*"')
+        self.assertNotIn('branches:', trigger)
+        preflight = (ROOT / '.github/workflows/macos13-compat-preflight.yml').read_text()
+        self.assertNotIn('scripts/build.sh', preflight)
+        self.assertNotIn('scripts/package-snow-shot.sh', preflight)
+
+
 class ReleaseValidation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -131,22 +194,14 @@ class ReleaseValidation(unittest.TestCase):
                 if output.exists() else {}
             return result, values
 
-    def test_supported_branches_build_without_publishing(self):
-        for branch in ('feature/macos13-compat', 'fix/macos13-v1.4.3-pin-constructor'):
-            with self.subTest(branch=branch):
-                result, values = self.validate('branch', branch)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(values, {'version': '1.4.3', 'revision': 'smoke',
-                                         'release_tag': '', 'publish': 'false'})
-        self.assertIn("if: needs.validate.outputs.publish == 'true'", self.release)
-
-    def test_unrelated_branches_are_rejected(self):
-        for branch in ('main', 'fix/macos14-probe', 'feature/macos13-compat-other'):
+    def test_branch_dispatch_cannot_start_full_builds(self):
+        for branch in ('feature/macos13-compat', 'fix/macos13-probe', 'main'):
             with self.subTest(branch=branch):
                 result, values = self.validate('branch', branch)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('Unsupported smoke-build branch', result.stderr)
+                self.assertIn('Full compatibility builds require', result.stderr)
                 self.assertEqual(values, {})
+        self.assertIn("if: needs.validate.outputs.publish == 'true'", self.release)
 
     def test_valid_tag_preserves_publishing(self):
         result, values = self.validate('tag', 'macos13-v1.4.3-r4')
@@ -162,8 +217,8 @@ class ReleaseValidation(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(values, {})
 
-    def test_smoke_build_still_requires_compatible_deployment_target(self):
-        result, values = self.validate('branch', 'fix/macos13-probe', target='15.0')
+    def test_tag_build_requires_compatible_deployment_target(self):
+        result, values = self.validate('tag', 'macos13-v1.4.3-r4', target='15.0')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(values, {})
 

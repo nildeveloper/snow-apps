@@ -27,13 +27,15 @@ jobs:
           submodules: recursive
       - name: Check compatibility source boundaries
         run: python3 scripts/test-macos13-source-compat.py -v
+      - name: Check diagnostics compile scope
+        run: python3 scripts/test-diagnostics-compile-scope.py -v
       - name: Check compilation cache transport
         run: python3 scripts/test-macos13-compile-cache.py -v
       - name: Check idempotent Metal compatibility preparation
         run: python3 scripts/test-prepare-macos13-metal.py -v
       - name: Check macOS compatibility policy
         run: >-
-          python3 scripts/test-macos-build-support.py QtMacOSDeploymentPolicy
+          python3 scripts/test-macos-build-support.py QtMacOSDeploymentPolicy MiniCargoCachePolicy
           MacOSBuildScripts.test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging
           MacOSBuildScripts.test_arm64_prepares_metal_before_bootstrap_and_configure
           MacOSBuildScripts.test_x64_does_not_prepare_arm64_metal

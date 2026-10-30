@@ -2174,8 +2174,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/SnowShotUpdates.cmake")
 if(WIN32)
     target_link_libraries(snow_shot PRIVATE ole32 oleaut32 shell32 uuid)
 endif()
-target_compile_definitions(snow_shot PRIVATE
-    QT_MESSAGELOGCONTEXT
+target_compile_definitions(snow_shot PRIVATE QT_MESSAGELOGCONTEXT)
+# Only main.cpp consumes the app identity. Keep revision changes out of unrelated
+# compile commands; the Mini executable shares this source in the same directory.
+set_property(SOURCE src/app/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     SNOW_DIAGNOSTICS_VERSION="${SNOW_SHOT_VERSION}"
     SNOW_DIAGNOSTICS_REVISION="${SNOW_DIAGNOSTICS_REVISION}"
     SNOW_DIAGNOSTICS_BUILD="$<CONFIG>")

@@ -41,33 +41,27 @@ jobs:
             exit 1
           fi
 
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME}"
-            if [[ ! "${tag}" =~ ^macos13-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)-r([1-9][0-9]*)$ ]]; then
-              echo "Invalid compatibility tag: ${tag}" >&2
-              echo "Expected: macos13-v<upstream-version>-r<revision>, for example macos13-v1.3.9-r1" >&2
-              exit 1
-            fi
-
-            tag_version="${BASH_REMATCH[1]}"
-            revision="${BASH_REMATCH[3]}"
-            if [[ "${tag_version}" != "${source_version}" ]]; then
-              echo "Tag version ${tag_version} does not match source version ${source_version}" >&2
-              exit 1
-            fi
-            release_tag="${tag}"
-            publish=true
-          else
-            if [[ "${GITHUB_REF_NAME}" != "feature/macos13-compat" &&
-                  "${GITHUB_REF_NAME}" != fix/macos13-* ]]; then
-              echo "Unsupported smoke-build branch: ${GITHUB_REF_NAME}" >&2
-              exit 1
-            fi
-            revision=smoke
-            release_tag=
-            publish=false
-            echo "Running a manual full compatibility build; release publishing is disabled."
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "Full compatibility builds require a macos13-v<version>-r<revision> tag." >&2
+            echo "Branch pushes run the lightweight compatibility preflight instead." >&2
+            exit 1
           fi
+
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^macos13-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)-r([1-9][0-9]*)$ ]]; then
+            echo "Invalid compatibility tag: ${tag}" >&2
+            echo "Expected: macos13-v<upstream-version>-r<revision>, for example macos13-v1.3.9-r1" >&2
+            exit 1
+          fi
+
+          tag_version="${BASH_REMATCH[1]}"
+          revision="${BASH_REMATCH[3]}"
+          if [[ "${tag_version}" != "${source_version}" ]]; then
+            echo "Tag version ${tag_version} does not match source version ${source_version}" >&2
+            exit 1
+          fi
+          release_tag="${tag}"
+          publish=true
 
           if ! grep -Fq 'set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0"' CMakeLists.txt; then
             echo "Tagged source is not the macOS 13 compatibility build." >&2
@@ -178,12 +172,15 @@ jobs:
         id: compile-cache-key
         shell: bash
         env:
-          DEPENDENCY_HASH: ${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', 'scripts/build-toolchain.json', 'scripts/qt-toolchain.json', 'CMakePresets.json', 'vcpkg*.json', 'cmake/ocr/**', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/**', 'cmake/RustStaticLibrary.cmake', 'snow_shot/CMakeLists.txt', 'scripts/macos13-compile-cache.sh') }}
+          # Cargo/ccache validate source, flags, and crate dependencies themselves.
+          # Keep external native-library ABI inputs strict: build scripts may
+          # track a library path without noticing changed binaries at that path.
+          NATIVE_ABI_HASH: ${{ hashFiles('**/rust-toolchain.toml', 'scripts/build-toolchain.json', 'scripts/qt-toolchain.json', 'scripts/bootstrap-macos.sh', 'scripts/build-static-qt.sh', 'scripts/snow-build-environment.sh', 'CMakePresets.json', 'vcpkg*.json', 'cmake/ocr/*.patch', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/**', 'cmake/RustStaticLibrary.cmake', 'scripts/macos13-compile-cache.sh') }}
         run: |
           set -euo pipefail
           fingerprint="$(
             {
-              printf '%s\n' "${{ matrix.arch }}" "${{ matrix.preset }}" "${DEPENDENCY_HASH}" 'macos13-compile-v1'
+              printf '%s\n' "${{ matrix.arch }}" "${{ matrix.preset }}" "${NATIVE_ABI_HASH}" 'macos13-compile-v2'
               xcrun clang --version
               xcrun clang++ --version
               xcodebuild -version
@@ -236,6 +233,7 @@ jobs:
         shell: bash
         env:
           MACOSX_DEPLOYMENT_TARGET: "13.0"
+          CARGO_TARGET_DIR: ${{ env.SNOW_COMPILE_CACHE_ROOT }}/cargo-target/tests
         run: |
           cargo test --locked --manifest-path snow-crates/Cargo.toml -p snow-macos --lib capabilities::tests
           cargo test --locked --manifest-path snow-crates/Cargo.toml -p snow-macos --lib content::tests::fallback_window_displays
@@ -490,7 +488,8 @@ jobs:
           # and ccache live outside it, so --clean cannot discard their outputs.
           scripts/build.sh "${{ matrix.preset }}" --clean --skip-bootstrap \
             "${targets[@]}" --parallel "${{ matrix.parallel }}" -- \
-            "-DSNOW_RUST_CARGO_TARGET_DIR:PATH=${SNOW_COMPILE_CACHE_ROOT}/cargo-target" \
+            "-DSNOW_RUST_CARGO_TARGET_DIR:PATH=${SNOW_COMPILE_CACHE_ROOT}/cargo-target/full" \
+            "-DSNOW_SHOT_MINI_CARGO_TARGET_DIR:PATH=${SNOW_COMPILE_CACHE_ROOT}/cargo-target/mini" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
@@ -521,7 +520,7 @@ jobs:
           path: ${{ runner.temp }}/${{ steps.compile-cache-key.outputs.artifact_name }}.tar.zst
           if-no-files-found: error
           compression-level: 0
-          retention-days: 7
+          retention-days: 14
 
       - name: Remove packed compilation cache
         if: ${{ !cancelled() && steps.pack-compile-cache.outcome == 'success' }}
