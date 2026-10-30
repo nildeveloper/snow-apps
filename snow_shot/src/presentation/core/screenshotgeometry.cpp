@@ -6,8 +6,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #ifdef Q_OS_MACOS
-#include <QtGui/qscreen_platform.h>
-#import <AppKit/AppKit.h>
+#include "../../platform/macos/qtscreencompat_p.h"
 #endif
 #include <QtGlobal>
 
@@ -39,41 +38,8 @@ QSize scaledSelectionPixelSize(const QSize& selection, qreal scale) {
     return QSize(static_cast<int>(pixelWidth), static_cast<int>(pixelHeight));
 }
 #ifdef Q_OS_MACOS
-QRectF macDesktopRect(NSRect rect) {
-    NSScreen* primary = NSScreen.screens.firstObject;
-    if (primary == nil) {
-        return {};
-    }
-    const CGFloat desktopTop = NSMaxY(primary.frame);
-    return {rect.origin.x, desktopTop - NSMaxY(rect), rect.size.width, rect.size.height};
-}
-
-std::optional<uint32_t> macNativeDisplayId(const QScreen& screen) {
-    const QRectF target(screen.geometry());
-    for (NSScreen* native in NSScreen.screens) {
-        if (macDesktopRect(native.frame) != target) {
-            continue;
-        }
-        NSNumber* number = [native.deviceDescription objectForKey:@"NSScreenNumber"];
-        if (number != nil) {
-            return number.unsignedIntValue;
-        }
-    }
-    return std::nullopt;
-}
-
-QScreen* macScreenForDisplayId(uint32_t displayId) {
-    for (QScreen* screen : QGuiApplication::screens()) {
-        if (screen == nullptr) {
-            continue;
-        }
-        const auto nativeId = macNativeDisplayId(*screen);
-        if (nativeId && *nativeId == displayId) {
-            return screen;
-        }
-    }
-    return nullptr;
-}
+using snow_shot::platform::qt_screen_compat::macNativeDisplayId;
+using snow_shot::platform::qt_screen_compat::macScreenForDisplayId;
 #endif
 
 } // namespace

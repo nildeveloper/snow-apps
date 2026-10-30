@@ -1,15 +1,19 @@
 # macOS 13 compatibility CI
 
-Pushes to `feature/macos13-compat` run the preflight workflow: native jthread
-probes for both architectures, compatibility-policy checks and focused build
-script/cache transport regression checks. These checks do not build the whole
-application or publish packages.
+Pushes to `feature/macos13-compat` and `fix/macos13-*` run the preflight workflow:
+native jthread probes for both architectures, compatibility-policy checks and focused build
+script/cache transport regression checks. Native probes also exercise stop-aware
+waiting with the selected standard library/backport and a forced fallback.
+These checks do not build the whole application or publish packages.
 
 The release workflow runs for `macos13-v<source-version>-r<revision>` tags. Its
-manual dispatch can build `feature/macos13-compat` without publishing a release.
+manual dispatch can build `feature/macos13-compat` or `fix/macos13-*` without
+publishing a release.
 Tag builds still compile and package Full for ARM64 and Intel, plus ARM64 Mini,
 with the release presets and their existing optimization/signing/checksum checks.
 They do not use the fast presets or change release optimization levels.
+Both architectures run focused `snow-macos` capability and lazy display-fallback
+tests before building the application; these do not test physical capture behavior.
 
 ## Compilation cache
 

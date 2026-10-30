@@ -58,7 +58,8 @@ jobs:
             release_tag="${tag}"
             publish=true
           else
-            if [[ "${GITHUB_REF_NAME}" != "feature/macos13-compat" ]]; then
+            if [[ "${GITHUB_REF_NAME}" != "feature/macos13-compat" &&
+                  "${GITHUB_REF_NAME}" != fix/macos13-* ]]; then
               echo "Unsupported smoke-build branch: ${GITHUB_REF_NAME}" >&2
               exit 1
             fi
@@ -237,6 +238,14 @@ jobs:
           # Prove the graph that failed in the previous smoke build is now
           # complete before spending time on the native application build.
           cargo metadata             --manifest-path snow-crates/Cargo.toml             --locked             --offline             --format-version 1             >/dev/null
+
+      - name: Test native capture compatibility boundaries
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+        run: |
+          cargo test --locked --manifest-path snow-crates/Cargo.toml -p snow-macos --lib capabilities::tests
+          cargo test --locked --manifest-path snow-crates/Cargo.toml -p snow-macos --lib content::tests::fallback_window_displays
 
       - name: Resolve reusable vcpkg cache
         id: vcpkg-cache-key
@@ -588,12 +597,17 @@ jobs:
       REVISION: ${{ needs.validate.outputs.revision }}
 
     steps:
-      - name: Download packaged assets
+      - name: Download Apple Silicon packages
         uses: actions/download-artifact@v4
         with:
-          pattern: macos13-*
+          name: macos13-arm64
           path: dist
-          merge-multiple: true
+
+      - name: Download Intel packages
+        uses: actions/download-artifact@v4
+        with:
+          name: macos13-x64
+          path: dist
 
       - name: Verify complete asset set
         shell: bash
@@ -643,7 +657,7 @@ jobs:
 
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${RELEASE_TAG}"               --repo "${GITHUB_REPOSITORY}"               --title "${title}"               --notes-file release-notes.md               --prerelease
-            gh release upload "${RELEASE_TAG}" dist/*               --repo "${GITHUB_REPOSITORY}"               --clobber
+            gh release upload "${RELEASE_TAG}" dist/*.dmg dist/*.dmg.sha256               --repo "${GITHUB_REPOSITORY}"               --clobber
           else
-            gh release create "${RELEASE_TAG}" dist/*               --repo "${GITHUB_REPOSITORY}"               --verify-tag               --title "${title}"               --notes-file release-notes.md               --prerelease
+            gh release create "${RELEASE_TAG}" dist/*.dmg dist/*.dmg.sha256               --repo "${GITHUB_REPOSITORY}"               --verify-tag               --title "${title}"               --notes-file release-notes.md               --prerelease
           fi

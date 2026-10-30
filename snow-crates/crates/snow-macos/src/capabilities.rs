@@ -48,19 +48,17 @@ pub struct CaptureSupport {
 impl CaptureSupport {
     pub fn current() -> Self {
         let api = ApiSupport::current();
+        Self::from_api(
+            api,
+            cfg!(target_arch = "aarch64"),
+            api.screen_capture_kit && objc2_metal::MTLCreateSystemDefaultDevice().is_some(),
+        )
+    }
+    fn from_api(api: ApiSupport, apple_silicon: bool, metal: bool) -> Self {
         Self {
             screen_capture_kit: api.screen_capture_kit,
-            metal_composition: api.screen_capture_kit
-                && objc2_metal::MTLCreateSystemDefaultDevice().is_some(),
-            hdr_capture: api.hdr_capture && cfg!(target_arch = "aarch64"),
-        }
-    }
-    #[cfg(test)]
-    fn from_host(supported_os: bool, apple_silicon: bool, metal: bool) -> Self {
-        Self {
-            screen_capture_kit: supported_os,
-            metal_composition: supported_os && metal,
-            hdr_capture: supported_os && apple_silicon,
+            metal_composition: api.screen_capture_kit && metal,
+            hdr_capture: api.hdr_capture && apple_silicon,
         }
     }
     pub fn native_format(self, range: DynamicRange) -> MacResult<PixelFormat> {
@@ -120,8 +118,36 @@ mod tests {
     }
 
     #[test]
+    fn hdr_requires_macos_15_and_apple_silicon() {
+        for version in [13, 14, 15] {
+            let api = ApiSupport::from_levels(true, version >= 14, version >= 15);
+            for apple_silicon in [false, true] {
+                let support = CaptureSupport::from_api(api, apple_silicon, true);
+                assert!(support.screen_capture_kit);
+                assert!(support.metal_composition);
+                assert_eq!(
+                    support.native_format(DynamicRange::Sdr).unwrap(),
+                    PixelFormat::Bgra8
+                );
+                if version >= 15 && apple_silicon {
+                    assert_eq!(
+                        support.native_format(DynamicRange::Hdr).unwrap(),
+                        PixelFormat::Rgba16Float
+                    );
+                } else {
+                    assert!(matches!(
+                        support.native_format(DynamicRange::Hdr),
+                        Err(MacError::Unsupported(_))
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn architecture_os_and_pixel_depth_are_independent_capabilities() {
-        let intel = CaptureSupport::from_host(true, false, true);
+        let api = ApiSupport::from_levels(true, true, true);
+        let intel = CaptureSupport::from_api(api, false, true);
         assert_eq!(
             intel.native_format(DynamicRange::Sdr).unwrap(),
             PixelFormat::Bgra8
@@ -130,7 +156,7 @@ mod tests {
             intel.native_format(DynamicRange::Hdr),
             Err(MacError::Unsupported(_))
         ));
-        let apple = CaptureSupport::from_host(true, true, true);
+        let apple = CaptureSupport::from_api(api, true, true);
         assert!(
             apple
                 .validate_cpu_format(DynamicRange::Hdr, PixelFormat::Rgba16Float)
@@ -146,13 +172,13 @@ mod tests {
                 .validate_cpu_format(DynamicRange::Sdr, PixelFormat::P010)
                 .is_err()
         );
-        let old = CaptureSupport::from_host(false, true, true);
+        let old = CaptureSupport::from_api(ApiSupport::from_levels(false, false, false), true, true);
         assert!(matches!(
             old.native_format(DynamicRange::Sdr),
             Err(MacError::UnsupportedOs)
         ));
         assert!(!old.metal_composition);
-        let headless = CaptureSupport::from_host(true, true, false);
+        let headless = CaptureSupport::from_api(api, true, false);
         assert!(headless.hdr_capture);
         assert!(!headless.metal_composition);
     }

@@ -1,4 +1,5 @@
 #include "snow/image/processing.h"
+#include "snow/image/detail/stop_wait.h"
 
 #include <snow/memory/pixel_array.h>
 
@@ -1943,9 +1944,7 @@ Result<AlphaContent> classify_alpha(const Image& image, std::stop_token stop) {
             return analysis.value.load(std::memory_order_acquire) !=
                    detail::AlphaAnalysisValue::analyzing;
         };
-        std::stop_callback wake_waiter(stop, [&analysis] { analysis.changed.notify_all(); });
-        analysis.changed.wait(lock, [&] { return stop.stop_requested() || analysis_finished(); });
-        if (!analysis_finished()) {
+        if (!detail::stop_aware_wait(analysis.changed, lock, stop, analysis_finished)) {
             return Status::error(ErrorCode::cancelled, "Alpha classification was cancelled.");
         }
     }

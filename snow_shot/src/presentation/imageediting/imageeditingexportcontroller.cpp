@@ -97,8 +97,8 @@ struct ImageEditingExportController::Impl {
     Pin pin;
     QPointer<Request> active;
 
-    Impl(ImageEditingExportController& owner, ScreenshotPrintService* printService)
-        : q(owner), printing(printService) {}
+    Impl(ImageEditingExportController& owner, ScreenshotPrintService* printService, Pin pinHandler)
+        : q(owner), printing(printService), pin(std::move(pinHandler)) {}
 
     void finish(QPointer<Request> request, bool success, QString error = {}) {
         if (!request || active != request)

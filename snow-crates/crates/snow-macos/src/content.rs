@@ -386,9 +386,22 @@ fn window_info(window: &SCWindow, displays: &[DisplayInfo]) -> WindowInfo {
         }
     }
 }
+fn fallback_window_displays(
+    native_filter_geometry: bool,
+    load: impl FnOnce() -> MacResult<Vec<DisplayInfo>>,
+) -> MacResult<Vec<DisplayInfo>> {
+    if native_filter_geometry {
+        Ok(Vec::new())
+    } else {
+        load()
+    }
+}
 pub fn windows(timeout: Duration) -> MacResult<Vec<WindowInfo>> {
     let content = shareable_content(timeout)?;
-    let displays = displays_from(&content)?;
+    let displays = fallback_window_displays(
+        crate::capabilities::ApiSupport::current().filter_geometry,
+        || displays_from(&content),
+    )?;
     Ok(unsafe { content.windows() }
         .iter()
         .map(|window| window_info(&window, &displays))
@@ -408,7 +421,10 @@ pub(crate) fn window_cancelable(
     window_from(&content, id)
 }
 pub(crate) fn window_from(content: &SCShareableContent, id: u32) -> MacResult<WindowInfo> {
-    let displays = displays_from(content)?;
+    let displays = fallback_window_displays(
+        crate::capabilities::ApiSupport::current().filter_geometry,
+        || displays_from(content),
+    )?;
     unsafe { content.windows() }
         .iter()
         .find(|window| unsafe { window.windowID() == id })
@@ -485,6 +501,61 @@ mod tests {
     use super::*;
     use objc2_core_foundation::{CGPoint, CGSize};
     use objc2_core_graphics::CGRectCreateDictionaryRepresentation;
+
+    #[test]
+    fn fallback_window_displays_skips_loading_with_native_geometry() {
+        let mut called = false;
+        let displays = fallback_window_displays(true, || {
+            called = true;
+            Err(MacError::TargetUnavailable)
+        })
+        .unwrap();
+        assert!(!called);
+        assert!(displays.is_empty());
+    }
+
+    #[test]
+    fn fallback_window_displays_preserves_legacy_geometry() {
+        let mut calls = 0;
+        let displays = fallback_window_displays(false, || {
+            calls += 1;
+            Ok(vec![DisplayInfo {
+                id: 42,
+                bounds: DesktopRect {
+                    space: DesktopSpace::Points,
+                    x: -100.0,
+                    y: 20.0,
+                    width: 100.0,
+                    height: 50.0,
+                },
+                pixels: PixelSize::new(200, 100).unwrap(),
+                primary: true,
+            }])
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(displays.len(), 1);
+        let display = &displays[0];
+        assert_eq!(display.id, 42);
+        assert_eq!(display.bounds.space, DesktopSpace::Points);
+        assert_eq!(display.bounds.x, -100.0);
+        assert_eq!(display.bounds.y, 20.0);
+        assert_eq!(display.bounds.width, 100.0);
+        assert_eq!(display.bounds.height, 50.0);
+        assert_eq!(display.pixels, PixelSize::new(200, 100).unwrap());
+        assert!(display.primary);
+    }
+
+    #[test]
+    fn fallback_window_displays_propagates_legacy_errors() {
+        let mut calls = 0;
+        let result = fallback_window_displays(false, || {
+            calls += 1;
+            Err(MacError::TargetUnavailable)
+        });
+        assert_eq!(calls, 1);
+        assert!(matches!(result, Err(MacError::TargetUnavailable)));
+    }
 
     #[test]
     fn content_flights_do_not_mix_window_visibility_modes() {
