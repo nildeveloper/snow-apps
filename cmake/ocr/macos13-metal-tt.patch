@@ -1,0 +1,11 @@
+--- a/src/runtime/gpu/metal/build.rs
++++ b/src/runtime/gpu/metal/build.rs
+@@ -169,8 +169,6 @@
+                 &native_target,
+                 "-arch",
+                 "applegpu_g16g",
+-                "-no-pack-sources",
+-                "-compress-resources",
+                 "-o",
+             ])
+             .arg(out.join("ocr.binary.metallib")));

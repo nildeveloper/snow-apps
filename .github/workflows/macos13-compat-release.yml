@@ -150,6 +150,19 @@ jobs:
           fi
           xcrun metal --version
 
+      - name: Apply Metal translator compatibility patch
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Xcode 16's metal-tt rejects the optional resource packing flags.
+          # Keep native archives and outer deflate compression enabled.
+          # Fail if the pinned upstream source no longer matches the patch.
+          patch="${GITHUB_WORKSPACE}/cmake/ocr/macos13-metal-tt.patch"
+          ocr="${GITHUB_WORKSPACE}/snow-crates/crates/simd-paddle-ocr-rs"
+          git -C "${ocr}" apply --check "${patch}"
+          git -C "${ocr}" apply "${patch}"
+
       - name: Select Rust toolchain
         shell: bash
         run: |
