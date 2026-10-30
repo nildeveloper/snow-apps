@@ -157,7 +157,7 @@ jobs:
           fi
           xcrun metal --version
 
-      - name: Apply Metal translator compatibility patch
+      - name: Apply Metal compatibility patch and probe native archive compiler
         if: matrix.arch == 'arm64'
         shell: bash
         run: |
@@ -169,6 +169,7 @@ jobs:
           ocr="${GITHUB_WORKSPACE}/snow-crates/crates/simd-paddle-ocr-rs"
           git -C "${ocr}" apply --check "${patch}"
           git -C "${ocr}" apply "${patch}"
+          python3 scripts/check-macos13-metal-toolchain.py
 
       - name: Select Rust toolchain
         shell: bash

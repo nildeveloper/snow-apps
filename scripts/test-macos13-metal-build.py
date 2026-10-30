@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zlib
@@ -44,6 +45,19 @@ if args[0] == 'metal-tt':
     assert args[args.index('-arch') + 1] == 'applegpu_g16g'
     spec = json.loads(Path(args[1]).read_text())
     assert spec['pipelines']['compute_pipelines']
+    defaults = {
+        'threadgroup_size_is_multiple_of_thread_execution_width': False,
+        'max_total_threads_per_threadgroup': 0,
+        'max_call_stack_depth': 1,
+        'support_indirect_command_buffers': False,
+        'support_adding_binary_functions': False,
+    }
+    for pipeline in spec['pipelines']['compute_pipelines']:
+        unknown = set(pipeline) - set(defaults) - {'compute_function'}
+        if unknown:
+            sys.exit('metal-tt: unknown field: ' + sorted(unknown)[0])
+        assert pipeline['compute_function'].startswith('alias:OCR#')
+        assert {key: pipeline[key] for key in defaults} == defaults
 assert args[0] in ('metal', 'metallib', 'metal-tt'), args
 Path(args[args.index('-o') + 1]).write_bytes(b'fixture archive data')
 '''
@@ -88,6 +102,17 @@ miniz_oxide = "=0.8.9"
             self.assertNotEqual(baseline.returncode, 0)
             self.assertIn('unknown argument: -no-pack-sources', baseline.stderr)
 
+            # Reproduce r2 as well: removing only the command-line flags still
+            # fails because the old translator rejects newer JSON fields.
+            build_script = metal / 'build.rs'
+            original = build_script.read_text()
+            build_script.write_text(original.replace(
+                '                "-no-pack-sources",\n                "-compress-resources",\n', ''))
+            flags_only = cargo('run', '--locked', '--quiet')
+            self.assertNotEqual(flags_only.returncode, 0)
+            self.assertIn('unknown field: contention_relief', flags_only.stderr)
+            build_script.write_text(original)
+
             # Apply the same exact patch as CI, to an isolated copy of the
             # pinned sources. Never modify the actual submodule during testing.
             for extra in (['--check'], []):
@@ -106,11 +131,22 @@ miniz_oxide = "=0.8.9"
             self.assertEqual(cached.returncode, 0, cached.stderr)
             self.assertEqual(log.read_bytes(), before, 'unchanged shaders must reuse outputs')
 
+            def probe():
+                return subprocess.run(
+                    [sys.executable, str(ROOT / 'scripts/check-macos13-metal-toolchain.py')],
+                    env=environment, text=True, capture_output=True)
+
+            checked = probe()
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            self.assertIn('native archive probe passed', checked.stdout)
             (out / 'metal-compiler.txt').unlink()
             environment['MOCK_METAL_FAIL'] = '1'
             failed = cargo('run', '--locked', '--quiet')
             self.assertNotEqual(failed.returncode, 0)
             self.assertIn('fixture: shader compilation failed', failed.stderr)
+            rejected = probe()
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('fixture: shader compilation failed', rejected.stderr)
 
 
 if __name__ == '__main__':

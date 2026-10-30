@@ -1,6 +1,18 @@
 --- a/src/runtime/gpu/metal/build.rs
 +++ b/src/runtime/gpu/metal/build.rs
-@@ -169,8 +169,6 @@
+@@ -100,10 +100,7 @@
+                     "max_total_threads_per_threadgroup":0,
+                     "max_call_stack_depth":1,
+                     "support_indirect_command_buffers":false,
+-                    "support_adding_binary_functions":false,
+-                    "optimize_for_persistent_kernel":false,
+-                    "forward_progress_usage":"Automatic",
+-                    "contention_relief":"Automatic"
++                    "support_adding_binary_functions":false
+                 }));
+             }
+         }
+@@ -169,8 +166,6 @@
                  &native_target,
                  "-arch",
                  "applegpu_g16g",
