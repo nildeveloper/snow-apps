@@ -1,9 +1,13 @@
 # macOS 13 OCR build compatibility
 
 The compatibility release workflow and local ARM64 `scripts/build.sh` both run
-`python3 scripts/prepare-macos13-metal.py` before the application build. Intel
-builds do not need this preparation. Direct CMake/Cargo ARM64 builds must run the
-same command explicitly first.
+`python3 scripts/prepare-macos13-metal.py` before the application build. Automatic
+preparation applies to the default build, explicit `snow_shot`, `snow_shot_mini`,
+`snow_ocr_process`, `snow_ocr_process_build`, `snow-all`, `snow-tests`, `all`,
+`package` and `install` targets. Other explicit targets (for example `snow_image`
+or `snow-format`) do not acquire a Metal prerequisite or modify the submodule.
+Intel builds do not need this preparation. Direct CMake/Cargo ARM64 builds and
+custom targets that build OCR must run the same command explicitly first.
 
 The helper verifies the OCR checkout matches the recorded submodule commit and
 checks `macos13-metal-tt.patch` against a temporary copy of that committed source.

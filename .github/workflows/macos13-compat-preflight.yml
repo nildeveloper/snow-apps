@@ -39,6 +39,9 @@ jobs:
           MacOSBuildScripts.test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging
           MacOSBuildScripts.test_arm64_prepares_metal_before_bootstrap_and_configure
           MacOSBuildScripts.test_x64_does_not_prepare_arm64_metal
+          MacOSBuildScripts.test_explicit_non_ocr_targets_do_not_prepare_metal
+          MacOSBuildScripts.test_explicit_application_targets_prepare_metal_once
+          MacOSBuildScripts.test_explicit_ocr_and_aggregate_targets_prepare_metal
           MacOSBuildScripts.test_metal_preparation_failure_stops_before_configure_or_build -v
 
   jthread:

@@ -1342,6 +1342,25 @@ if name == 'openssl':
         calls = self.run_script('build.sh', 'snow-shot-macos-x64-debug')
         self.assertNotIn(['prepare-macos13-metal'], calls)
 
+    def test_explicit_non_ocr_targets_do_not_prepare_metal(self):
+        self.env['FAIL_METAL_PREPARATION'] = '1'
+        calls = self.run_script('build.sh', '--skip-bootstrap',
+                                '--target', 'snow_image', '--target', 'snow-format')
+        self.assertNotIn(['prepare-macos13-metal'], calls)
+        self.assertTrue(any('--build' in call for call in calls))
+
+    def test_explicit_application_targets_prepare_metal_once(self):
+        calls = self.run_script('build.sh', '--skip-bootstrap', '--target', 'snow_image',
+                                '--target', 'snow_shot', '--target', 'snow_shot_mini')
+        self.assertEqual(calls.count(['prepare-macos13-metal']), 1)
+
+    def test_explicit_ocr_and_aggregate_targets_prepare_metal(self):
+        for target in ('snow_ocr_process_build', 'snow-all', 'snow-tests', 'all', 'package', 'install'):
+            with self.subTest(target=target):
+                self.log.unlink(missing_ok=True)
+                calls = self.run_script('build.sh', '--skip-bootstrap', '--target', target)
+                self.assertEqual(calls.count(['prepare-macos13-metal']), 1)
+
     def test_metal_preparation_failure_stops_before_configure_or_build(self):
         self.env['FAIL_METAL_PREPARATION'] = '1'
         calls = self.run_script('build.sh', '--skip-bootstrap', success=False)

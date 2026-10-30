@@ -644,6 +644,7 @@ jobs:
           - Architectures: Apple Silicon (arm64) and Intel (x86_64)
           - Packages are ad-hoc signed by the build pipeline and are not Apple-notarized.
           - Automatic upstream updates remain disabled in this compatibility build.
+          - CI builds on macOS 15 with a macOS 13 deployment target; physical Ventura capture, mixed-DPI and display hot-plug behavior are not validated by these builds.
 
           Assets include the DMG packages and matching SHA-256 sidecars. Apple Silicon also includes Snow Shot Mini.
           EOF
