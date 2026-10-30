@@ -1989,6 +1989,7 @@ set(PROJECT_CXX_SOURCES
     src/presentation/pinned/screenshotpinnednativegeometrycontroller.h
     src/presentation/pinned/screenshotpinnedclickthroughgeometry.cpp
     src/presentation/pinned/screenshotpinnedclickthroughgeometry.h
+    src/presentation/pinned/screenshotpinnedcrop.cpp
     src/presentation/pinned/screenshotpinnedinteraction.cpp
     include/snow_shot/presentation/pinnedwindowselectioncontroller.h
     src/presentation/pinned/pinnedwindowselectioncontroller.cpp
@@ -5218,6 +5219,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         src/presentation/pinned/screenshotpinnedwindow.cpp
         src/presentation/pinned/screenshotpinnedbatchsave.cpp
         src/presentation/services/pinnedwindowgroupmanager.cpp
+        src/presentation/pinned/screenshotpinnedcrop.cpp
         src/presentation/pinned/screenshotpinnedinteraction.cpp
         include/snow_shot/presentation/pinnedwindowselectioncontroller.h
         src/presentation/pinned/pinnedwindowselectioncontroller.cpp
@@ -5504,6 +5506,12 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-pinned-shortcut-display-tests PROPERTIES LABELS "unit")
     add_test(NAME snow-shot-pinned-menu-language-tests
         COMMAND snow-shot-pinned-window-tests --menu-language-only -platform offscreen)
+    add_test(NAME snow-shot-pinned-menu-lifetime-tests
+        COMMAND snow-shot-pinned-window-tests --menu-lifetime-only -platform offscreen)
+    set_tests_properties(snow-shot-pinned-menu-lifetime-tests PROPERTIES
+        LABELS "unit" TIMEOUT 30 SNOW_TEST_CROSS_PLATFORM TRUE
+        ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     set_tests_properties(snow-shot-pinned-menu-language-tests PROPERTIES
         LABELS "unit" TIMEOUT 30 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
@@ -10249,6 +10257,7 @@ if(WIN32 AND SNOW_SHOT_BUILD_BENCHMARKS)
         src/presentation/pinned/screenshotpinnedwindow.cpp
         src/presentation/pinned/screenshotpinnedbatchsave.cpp
         src/presentation/services/pinnedwindowgroupmanager.cpp
+        src/presentation/pinned/screenshotpinnedcrop.cpp
         src/presentation/pinned/screenshotpinnedinteraction.cpp
         include/snow_shot/presentation/pinnedwindowselectioncontroller.h
         src/presentation/pinned/pinnedwindowselectioncontroller.cpp
@@ -13399,3 +13408,34 @@ endif()
 # All focused fixtures and edition clones now exist. Resolve their source-owned
 # capabilities before the deferred Mini audit inspects the completed link graphs.
 snow_shot_resolve_source_dependencies()
+
+if(TARGET snow-shot-pinned-window-tests)
+    add_test(NAME snow-shot-pinned-crop-tests
+        COMMAND snow-shot-pinned-window-tests --crop-only -platform offscreen)
+    set_tests_properties(snow-shot-pinned-crop-tests PROPERTIES
+        LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    foreach(scale IN ITEMS 1.25 2)
+        add_test(NAME snow-shot-pinned-crop-dpi-${scale}-tests
+            COMMAND snow-shot-pinned-window-tests --crop-only -platform offscreen)
+        set_tests_properties(snow-shot-pinned-crop-dpi-${scale}-tests PROPERTIES
+            LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${scale}")
+    endforeach()
+    if(WIN32)
+        add_test(NAME snow-shot-pinned-crop-native-tests
+            COMMAND snow-shot-pinned-window-tests --crop-native-only -platform windows)
+        set_tests_properties(snow-shot-pinned-crop-native-tests PROPERTIES
+            LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 90)
+    elseif(APPLE)
+        add_test(NAME snow-shot-pinned-crop-native-tests
+            COMMAND snow-shot-pinned-window-tests --crop-native-only -platform cocoa)
+        set_tests_properties(snow-shot-pinned-crop-native-tests PROPERTIES
+            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 90)
+    endif()
+    if(SNOW_APPS_BUILD_BENCHMARKS)
+        add_test(NAME snow-shot-pinned-crop-performance-benchmark
+            COMMAND snow-shot-pinned-window-tests --crop-performance-only -platform offscreen)
+        set_tests_properties(snow-shot-pinned-crop-performance-benchmark PROPERTIES
+            LABELS "benchmark" RUN_SERIAL TRUE TIMEOUT 120 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()
