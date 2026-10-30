@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "canvas_automatic_selection_test_support.h"
+#include "physical_key_test_support.h"
 #include "snow_shot/presentation/imageeditingdocument.h"
 #include "snow_shot/presentation/imageeditingwindow.h"
 #include "snow_shot/presentation/imageeditingcanvas.h"
@@ -978,6 +979,63 @@ void verifyEditingToolbar(snow_shot::presentation::ImageEditingWindow& window) {
     editor->setGeometry(geometry);
     QApplication::processEvents();
 }
+void verifyRecognitionHistoryShortcuts() {
+    using namespace snow_shot::presentation;
+    auto recognized = source();
+    auto presentation = std::make_shared<ScreenshotOcrPresentation>();
+    presentation->selection = recognized.canvasRect.toRect();
+    ScreenshotOcrLine line;
+    line.text = QStringLiteral("Original text");
+    line.quad = {QPointF(-20, 15), QPointF(-15, 15), QPointF(-15, 17), QPointF(-20, 17)};
+    presentation->lines.append(line);
+    presentation->prepareForRendering();
+    recognized.recognition.key = QStringLiteral("editor-history");
+    recognized.recognition.text = ScreenshotOcrRecognitionResult{presentation};
+    for (const bool translation : {false, true}) {
+#if !SNOW_SHOT_ENABLE_TEXT_TRANSLATION
+        if (translation)
+            continue;
+#endif
+        ImageEditingWindow window;
+        window.present(recognized);
+        window.palette()->ocrRequested();
+        auto* session = window.recognition();
+        require(session && session->editing(), "image editor opens editable cached OCR");
+        if (translation) {
+            window.palette()->textTranslationRequested();
+            session->setTextDraft(QStringLiteral("Translation"));
+        }
+        auto* text = window.canvas()->parentWidget()->findChild<QTextEdit*>(
+            QStringLiteral("screenshotOcrEditor"));
+        require(text && text->isVisible() && !text->isReadOnly(),
+                "image editor exposes the active recognition result");
+        const QString baseline = session->textDraft();
+        auto cursor = text->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QStringLiteral(" edited"));
+        const QString edited = baseline + QStringLiteral(" edited");
+        window.canvas()->window()->activateWindow();
+        text->setFocus();
+        QApplication::processEvents();
+        require(text->hasFocus() && session->textDraft() == edited,
+                "typed result receives image editor keyboard commands");
+        const auto shortcut = [&](QKeySequence::StandardKey command) {
+            const auto combination = QKeySequence::keyBindings(command).first()[0];
+            for (const auto type :
+                 {QEvent::ShortcutOverride, QEvent::KeyPress, QEvent::KeyRelease}) {
+                PhysicalKeyEvent event(type, combination.key(), combination.keyboardModifiers());
+                QApplication::sendEvent(text, &event);
+            }
+        };
+        shortcut(QKeySequence::Undo);
+        require(session->textDraft() == baseline,
+                "keyboard Undo reaches the image editor result history");
+        shortcut(QKeySequence::Redo);
+        require(session->textDraft() == edited,
+                "keyboard Redo reaches the image editor result history");
+        window.shutdown();
+    }
+}
 } // namespace
 void runImageEditingEntryPointTests() {
     const int font = QFontDatabase::addApplicationFont(
@@ -992,6 +1050,7 @@ void runImageEditingCloseTests();
 void runImageEditingSourceTests();
 void runImageEditingSmartEraseTests();
 void runImageEditingSaveTests();
+void runImageEditingPinTests();
 void runImageEditingSpreadsheetOpenTests();
 void runImageEditingConversionAvailabilityTests();
 void runImageEditingCanvasTests();
@@ -1006,6 +1065,14 @@ void runImageEditingTests() {
         QStringLiteral(":/recording-test-fonts/SnowRecordingTestSans-Regular.ttf"));
     require(font >= 0, "editor fixtures load the bundled font");
     QApplication::setFont(QFont(QFontDatabase::applicationFontFamilies(font).first(), 12));
+    if (QApplication::arguments().contains(QStringLiteral("--image-editing-pin-only"))) {
+        runImageEditingPinTests();
+        return;
+    }
+    if (QApplication::arguments().contains(QStringLiteral("--image-editing-history-only"))) {
+        verifyRecognitionHistoryShortcuts();
+        return;
+    }
     if (QApplication::arguments().contains(
             QStringLiteral("--image-editing-automatic-selection-only"))) {
         canvas_automatic_selection_test::exercise([](auto verify) {
@@ -1099,15 +1166,50 @@ void runImageEditingTests() {
         QCoreApplication::setAttribute(nativeSiblings);
         const auto restoreNativeSiblings = qScopeGuard(
             [&] { QCoreApplication::setAttribute(nativeSiblings, previousNativeSiblings); });
-        const auto requireToolbarOpen = [](const ImageEditingWindow& editor) {
+        const auto requireEditorOpen = [](const ImageEditingWindow& editor) {
+            auto* surface = editor.canvas()->window();
+            require(surface->isVisible() && surface->windowHandle() &&
+                        surface->windowHandle()->isVisible(),
+                    "the image editor surface opens with its floating toolbar");
+#if defined(Q_OS_WIN)
+            if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+                const auto hwnd = reinterpret_cast<HWND>(surface->winId());
+                require(IsWindow(hwnd) && IsWindowVisible(hwnd),
+                        "the native image editor surface is visible when its toolbar opens");
+            }
+#endif
             auto* toolbar = editor.palette()->window();
             require(toolbar->isVisible() && editor.palette()->mainPanel()->isVisible() &&
                         toolbar->windowHandle() && toolbar->windowHandle()->isVisible(),
                     "main editing toolbar opens immediately without a resize or user interaction");
         };
+        {
+            ImageEditingWindow loading;
+            std::function<void(QImage)> deliver;
+            bool loaded = false;
+            QObject::connect(&loading, &ImageEditingWindow::loaded, &loading,
+                             [&](bool success) { loaded = success; });
+            loading.presentSource(ScreenshotExportSource::fromImageLoader(
+                [&](QObject*, std::function<void(QImage)> callback) {
+                    deliver = std::move(callback);
+                    return true;
+                }));
+            requireEditorOpen(loading);
+            awaitCondition([&] { return bool(deliver); }, "fresh editor starts loading");
+            requireEditorOpen(loading);
+            auto* message = statusMessage(loading);
+            require(message, "fresh editor shows loading feedback");
+            QPointer<QWidget> loadingNotice = message->noticeWidget();
+            std::exchange(deliver, {})(source().image);
+            awaitCondition([&] { return loaded; }, "fresh editor finishes loading");
+            requireEditorOpen(loading);
+            awaitCondition([&] { return !loadingNotice; }, "loading feedback finishes closing");
+            requireEditorOpen(loading);
+            loading.shutdown();
+        }
         ImageEditingWindow window;
         window.present(source());
-        requireToolbarOpen(window);
+        requireEditorOpen(window);
         QApplication::processEvents();
         if (nativeToolbar) {
             std::function<void(QImage)> deliver;
@@ -1151,7 +1253,7 @@ void runImageEditingTests() {
                         "native move/resize exit restores the editing toolbar");
             }
 #endif
-            requireToolbarOpen(window);
+            requireEditorOpen(window);
             window.shutdown();
             return;
         }
@@ -1168,7 +1270,7 @@ void runImageEditingTests() {
             loading.presentSource(ScreenshotExportSource::fromImageLoader(
                 [](QObject*, std::function<void(QImage)>) { return true; }));
             loadingToolbar = loading.palette()->window();
-            requireToolbarOpen(loading);
+            requireEditorOpen(loading);
             loading.shutdown();
         }
         require(!loadingToolbar, "closing the editor releases its independent toolbar");

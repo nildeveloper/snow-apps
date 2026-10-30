@@ -7,6 +7,8 @@
 #include "snow_shot/runtime/runtimeactivitytracker.h"
 
 #include "snow_shot/presentation/screenshotpinnedwindow.h"
+#include "snow_shot/presentation/livewindowsource.h"
+#include "snow_shot/presentation/imageeditingdocument.h"
 #include "snow_shot/presentation/screenshothistorytypes.h"
 #include "snow_shot/presentation/screenshotselectionpin.h"
 #include "snow_shot/presentation/pinnedgeometry.h"
@@ -1133,6 +1135,53 @@ bool ScreenshotSelectionExportUiServices::presentPinnedDocument(const QImage& ba
         snow_shot::storage::PinnedWindowCreationSource::ScreenshotHistory, &entry);
 }
 
+bool ScreenshotSelectionExportUiServices::presentLiveWindow(
+    std::shared_ptr<snow_shot::presentation::LiveWindowSource> source, QScreen* screen,
+    const QRect& nativeGeometry, const QSize& initialWindowSize, PinnedCompletion completion) {
+    if (!source || source->initialFrame().isNull() || !screen || !nativeGeometry.isValid())
+        return false;
+    auto* window = m_windowPool ? m_windowPool->acquire(screen) : nullptr;
+    if (!window)
+        return false;
+    ScreenshotPinnedWindow::Config config;
+    config.liveSource = std::move(source);
+    config.screen = screen;
+    config.nativeGeometry = nativeGeometry;
+    config.initialWindowSize = initialWindowSize;
+    config.canvasSourceRect = QRectF(QPointF(), QSizeF(initialWindowSize));
+    config.checkerboardEnabled = false;
+    config.imageSource = ScreenshotImageSource::fromImage(config.liveSource->initialFrame(),
+                                                          config.canvasSourceRect);
+    config.groupManager = m_groupManager;
+    config.selectionController = m_selectionController.get();
+    config.groupId = m_groupManager ? m_groupManager->activeGroupId() : QStringLiteral("default");
+    config.creationSource = snow_shot::storage::PinnedWindowCreationSource::Screenshot;
+    config.recognitionProvider = m_recognitionProvider;
+    applyPinRuntimeSettings(&config);
+    config.persistenceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // Supply ordinary callbacks for conversion, without reserving a recoverable live record.
+    applyPersistence(&config, config.persistenceId);
+    config.persistenceWriter = [](const snow_shot::storage::PinnedWindowRecord& record) {
+        auto& storage = snow_shot::storage::ApplicationStorage::instance();
+        if (storage.isInitialized()) {
+            auto& repository = storage.pinnedWindows();
+            static_cast<void>(repository.summary(record.id) ? repository.updateState(record)
+                                                            : repository.upsert(record));
+        }
+    };
+    configureVisibility(&config);
+    if (m_liveImageEditingRequested) {
+        QObject::connect(window, &ScreenshotPinnedWindow::imageEditingSnapshotRequested, window,
+                         [handler = m_liveImageEditingRequested](
+                             const snow_shot::presentation::ImageEditingSource& snapshot) {
+                             handler(ScreenshotExportSource::fromImage(snapshot.image));
+                         });
+    }
+    return presentPinnedWindowAndSynchronize(m_windowPool.get(), window, config,
+                                             m_showMainWindowRequested, m_imageSplittingRequested,
+                                             m_imageEditingRequested, std::move(completion));
+}
+
 void ScreenshotSelectionExportUiServices::configureVisibility(
     ScreenshotPinnedWindow::Config* config) {
     const QPointer<ScreenshotPendingPinCoordinator> lifetime(m_pendingPinCoordinator.get());
@@ -1146,6 +1195,10 @@ void ScreenshotSelectionExportUiServices::configureVisibility(
     config->hideOtherWindowsRequested = [this, lifetime](const QString& id) {
         if (!lifetime.isNull())
             static_cast<void>(hideOtherWindows(id));
+    };
+    config->shakeHideOtherWindowsRequested = [this, lifetime](const QString& id) {
+        return lifetime.isNull() ? ScreenshotPinnedWindow::HideOtherWindowsResult{}
+                                 : hideOtherWindowsWithResult(id);
     };
 }
 
@@ -1243,20 +1296,38 @@ void ScreenshotSelectionExportUiServices::showAllWindows() {
 }
 
 bool ScreenshotSelectionExportUiServices::hideOtherWindows(const QString& exceptId) {
+    return hideOtherWindowsWithResult(exceptId).success;
+}
+
+ScreenshotPinnedWindow::HideOtherWindowsResult
+ScreenshotSelectionExportUiServices::hideOtherWindowsWithResult(const QString& exceptId) {
     auto& storage = snow_shot::storage::ApplicationStorage::instance();
     if (!storage.isInitialized())
-        return false;
+        return {};
     const QString group =
         m_groupManager ? m_groupManager->activeGroupId() : QStringLiteral("default");
     const auto records = storage.pinnedWindows().summariesIncludingPending();
     QVector<QString> ids;
-    for (const auto& record : records)
-        if (!record.ignored && record.groupId == group && record.id != exceptId)
+    bool changed = false;
+    QSet<QString> seen;
+    ids.reserve(records.size() + m_restoringIds.size());
+    seen.reserve(records.size());
+    for (const auto& record : records) {
+        if (!record.ignored && record.groupId == group && record.id != exceptId) {
             ids.append(record.id);
-    for (auto it = m_restoringIds.cbegin(); it != m_restoringIds.cend(); ++it)
-        if (it->groupId == group && it.key() != exceptId && !ids.contains(it.key()))
+            seen.insert(record.id);
+            changed |= !record.hidden;
+        }
+    }
+    for (auto it = m_restoringIds.cbegin(); it != m_restoringIds.cend(); ++it) {
+        if (it->groupId == group && it.key() != exceptId) {
+            changed = true;
+            if (seen.contains(it.key()))
+                continue;
             ids.append(it.key());
-    return hideRecords(ids);
+        }
+    }
+    return {hideRecords(ids), changed};
 }
 
 bool ScreenshotSelectionExportUiServices::toggleAllWindowsVisibility() {
@@ -1498,6 +1569,7 @@ bool ScreenshotSelectionExportUiServices::presentRestoredRecord(
     config.persistedFirstCreationTextDpi = record.firstCreationTextDpi;
     config.persistedCanvasSession = record.canvasSession;
     config.persistedRecognitionResults = record.recognitionResults;
+    config.persistedTextType = record.textType;
     config.persistedRecognitionVisible = record.recognitionVisible;
     config.persistedTranslationVisible = record.translationVisible;
     config.groupManager = m_groupManager;

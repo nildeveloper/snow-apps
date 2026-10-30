@@ -13,6 +13,7 @@
     "McpDocumentService",
     "QObject",
     "SectionHeaderWidget",
+    "ShortcutDisplayService",
     "SidebarWidget",
     "SnowShotApiClient",
     "SystemTrayController",
@@ -79,6 +80,7 @@
     "ScreenshotImageFileService",
     "ScreenshotPdfExport",
     "ScreenshotPrintService",
+    "ScreenshotAirDropService",
     "ScreenshotRecognitionFileExport",
     "ScreenshotSaveAsFileDialog",
     "ScreenshotSavePreviewCanvas"
@@ -135,6 +137,7 @@
     "PinnedColorSwatch",
     "PinnedWindowManagementPageWidget",
     "ScreenshotHistoryPageWidget",
+    "LiveWindowSource",
     "ScreenshotPinnedWindow",
     "WindowGroupSwitcher",
     "snow_shot::presentation::ImageEditingWindow",

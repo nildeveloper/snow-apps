@@ -86,6 +86,7 @@ MutationResult undo(SnowRuntime runtime);
 MutationResult redo(SnowRuntime runtime);
 MutationResult resetEditingState(SnowRuntime runtime, SnowViewport viewport);
 MutationResult selectElement(SnowRuntime runtime, SnowViewport viewport, SnowElementId id);
+MutationResult clearSelection(SnowRuntime runtime, SnowViewport viewport);
 MutationResult deleteSelected(SnowRuntime runtime, SnowViewport viewport);
 MutationResult deleteAllElements(SnowRuntime runtime, SnowViewport viewport);
 MutationResult duplicateSelected(SnowRuntime runtime, SnowViewport viewport, double offsetX,
@@ -115,6 +116,8 @@ MutationResult setDistanceStylePatch(SnowRuntime runtime, SnowViewport viewport,
                                      const SnowDistanceStyle& style, std::uint32_t properties);
 MutationResult setAngleStylePatch(SnowRuntime runtime, SnowViewport viewport,
                                   const SnowAngleStyle& style, std::uint32_t properties);
+MutationResult setBracketStylePatch(SnowRuntime runtime, SnowViewport viewport,
+                                    const SnowBracketStyle& style, std::uint32_t properties);
 MutationResult setMagnifierStylePatch(SnowRuntime runtime, SnowViewport viewport,
                                       const SnowMagnifierStyle& style, std::uint32_t properties,
                                       bool creationDefaults);

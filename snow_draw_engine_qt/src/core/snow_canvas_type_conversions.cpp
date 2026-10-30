@@ -55,7 +55,7 @@ bool validShapeStyleEnums(const SnowCanvasShapeStyle& style) {
            enumInRange(style.highlightShape, SnowCanvasHighlightShape::Rectangle,
                        SnowCanvasHighlightShape::Ellipse) &&
            enumInRange(style.shape, SnowCanvasRectangleShape::Rectangle,
-                       SnowCanvasRectangleShape::Diamond) &&
+                       SnowCanvasRectangleShape::ThoughtBubble) &&
            enumInRange(style.brushMode, SnowCanvasBrushMode::Regular,
                        SnowCanvasBrushMode::PressureSensitive);
 }
@@ -116,6 +116,8 @@ SnowCanvasTool toCanvasTool(SnowActiveTool tool) {
         return SnowCanvasTool::Distance;
     case SNOW_ACTIVE_TOOL_ANGLE:
         return SnowCanvasTool::Angle;
+    case SNOW_ACTIVE_TOOL_BRACKET:
+        return SnowCanvasTool::Bracket;
     case SNOW_ACTIVE_TOOL_MAGNIFIER:
         return SnowCanvasTool::Magnifier;
     case SNOW_ACTIVE_TOOL_SPEECH_BUBBLE:
@@ -164,6 +166,8 @@ SnowActiveTool toEngineTool(SnowCanvasTool tool) {
         return SNOW_ACTIVE_TOOL_DISTANCE;
     case SnowCanvasTool::Angle:
         return SNOW_ACTIVE_TOOL_ANGLE;
+    case SnowCanvasTool::Bracket:
+        return SNOW_ACTIVE_TOOL_BRACKET;
     case SnowCanvasTool::Magnifier:
         return SNOW_ACTIVE_TOOL_MAGNIFIER;
     case SnowCanvasTool::SpeechBubble:
@@ -232,8 +236,12 @@ SnowCanvasStyleToolbarSource toCanvasStyleToolbarSource(SnowStyleToolbarSource s
         return SnowCanvasStyleToolbarSource::SelectedDistance;
     case SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_ANGLE:
         return SnowCanvasStyleToolbarSource::DefaultAngle;
+    case SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_BRACKET:
+        return SnowCanvasStyleToolbarSource::DefaultBracket;
     case SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_ANGLE:
         return SnowCanvasStyleToolbarSource::SelectedAngle;
+    case SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_BRACKET:
+        return SnowCanvasStyleToolbarSource::SelectedBracket;
     case SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_MAGNIFIER:
         return SnowCanvasStyleToolbarSource::DefaultMagnifier;
     case SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_MAGNIFIER:
@@ -520,13 +528,16 @@ SnowCanvasShapeStyle toCanvasShapeStyle(const SnowShapeStyle& style) {
         style.opacity,
         style.highlight_shape == SNOW_HIGHLIGHT_SHAPE_ELLIPSE ? SnowCanvasHighlightShape::Ellipse
                                                               : SnowCanvasHighlightShape::Rectangle,
-        style.shape == SNOW_RECTANGLE_SHAPE_ELLIPSE   ? SnowCanvasRectangleShape::Ellipse
-        : style.shape == SNOW_RECTANGLE_SHAPE_DIAMOND ? SnowCanvasRectangleShape::Diamond
-                                                      : SnowCanvasRectangleShape::Rectangle,
+        style.shape == SNOW_RECTANGLE_SHAPE_THOUGHT_BUBBLE ? SnowCanvasRectangleShape::ThoughtBubble
+        : style.shape == SNOW_RECTANGLE_SHAPE_ELLIPSE      ? SnowCanvasRectangleShape::Ellipse
+        : style.shape == SNOW_RECTANGLE_SHAPE_DIAMOND      ? SnowCanvasRectangleShape::Diamond
+                                                           : SnowCanvasRectangleShape::Rectangle,
         style.brush_mode == SNOW_BRUSH_MODE_PRESSURE_SENSITIVE
             ? SnowCanvasBrushMode::PressureSensitive
             : SnowCanvasBrushMode::Regular,
         toCanvasStrokeRenderingStyle(style.stroke_rendering_style),
+        toQColor(style.arrow_outline_color),
+        style.arrow_outline_width,
     };
 }
 
@@ -544,18 +555,34 @@ SnowShapeStyle toEngineShapeStyle(const SnowCanvasShapeStyle& style) {
     engineStyle.arrow_type = toEngineArrowType(style.arrowType);
     engineStyle.arrow_shaft_type = static_cast<SnowArrowShaftType>(style.arrowShaftType);
     engineStyle.arrow_ratio = snowCanvasNormalizeArrowRatio(style.arrowRatio);
+    engineStyle.arrow_outline_color = toEngineColor(style.arrowOutlineColor);
+    engineStyle.arrow_outline_width = std::isfinite(style.arrowOutlineWidth)
+                                          ? std::clamp(style.arrowOutlineWidth, 0.0, 72.0)
+                                          : 0.0;
     engineStyle.opacity = style.opacity;
     engineStyle.highlight_shape = style.highlightShape == SnowCanvasHighlightShape::Ellipse
                                       ? SNOW_HIGHLIGHT_SHAPE_ELLIPSE
                                       : SNOW_HIGHLIGHT_SHAPE_RECTANGLE;
     engineStyle.shape =
-        style.shape == SnowCanvasRectangleShape::Ellipse   ? SNOW_RECTANGLE_SHAPE_ELLIPSE
-        : style.shape == SnowCanvasRectangleShape::Diamond ? SNOW_RECTANGLE_SHAPE_DIAMOND
-                                                           : SNOW_RECTANGLE_SHAPE_RECTANGLE;
+        style.shape == SnowCanvasRectangleShape::ThoughtBubble ? SNOW_RECTANGLE_SHAPE_THOUGHT_BUBBLE
+        : style.shape == SnowCanvasRectangleShape::Ellipse     ? SNOW_RECTANGLE_SHAPE_ELLIPSE
+        : style.shape == SnowCanvasRectangleShape::Diamond     ? SNOW_RECTANGLE_SHAPE_DIAMOND
+                                                               : SNOW_RECTANGLE_SHAPE_RECTANGLE;
     engineStyle.brush_mode = style.brushMode == SnowCanvasBrushMode::PressureSensitive
                                  ? SNOW_BRUSH_MODE_PRESSURE_SENSITIVE
                                  : SNOW_BRUSH_MODE_REGULAR;
     return engineStyle;
+}
+
+bool validBracketStyle(const SnowCanvasBracketStyle& style) {
+    return style.stroke.isValid() && std::isfinite(style.strokeWidth) && style.strokeWidth >= 1.0 &&
+           style.strokeWidth <= 72.0;
+}
+SnowCanvasBracketStyle toCanvasBracketStyle(const SnowBracketStyle& style) {
+    return {toQColor(style.stroke), style.stroke_width};
+}
+SnowBracketStyle toEngineBracketStyle(const SnowCanvasBracketStyle& style) {
+    return {toEngineColor(style.stroke), style.strokeWidth};
 }
 
 bool validAngleStyle(const SnowCanvasAngleStyle& style) {
@@ -631,7 +658,7 @@ bool validDistanceStyle(const SnowCanvasDistanceStyle& style) {
     return style.stroke.isValid() && std::isfinite(style.strokeWidth) && style.strokeWidth >= 1.0 &&
            style.strokeWidth <= 72.0 && std::isfinite(style.factor) && style.factor >= 0.01 &&
            style.factor <= 1000.0 &&
-           enumInRange(style.unit, SnowCanvasDistanceUnit::Px, SnowCanvasDistanceUnit::Mm) &&
+           enumInRange(style.unit, SnowCanvasDistanceUnit::Px, SnowCanvasDistanceUnit::Um) &&
            style.decimalPlaces >= 0 && style.decimalPlaces <= 3 &&
            std::isfinite(style.endpointScale) && style.endpointScale >= 0.5 &&
            style.endpointScale <= 3.0 &&
@@ -759,7 +786,9 @@ SnowCanvasStyleToolbarState toCanvasStyleToolbarState(const SnowStyleToolbarStat
         toCanvasDistanceStyle(state.distance_style),
         state.distance_style_mixed,
         toCanvasAngleStyle(state.angle_style),
+        toCanvasBracketStyle(state.bracket_style),
         state.angle_style_mixed,
+        state.bracket_style_mixed,
         state.distance_measured_length,
         toCanvasMagnifierStyle(state.magnifier_style),
         state.magnifier_style_mixed,
@@ -895,6 +924,11 @@ bool toEngineStyleDefaults(const SnowCanvasStyleDefaults& defaults,
         &defaults.penHighlight,
         &defaults.speechBubble,
     };
+    for (const auto* style : shapes) {
+        if (style != &defaults.speechBubble &&
+            style->shape == SnowCanvasRectangleShape::ThoughtBubble)
+            return false;
+    }
     if (std::any_of(
             std::begin(shapes), std::end(shapes),
             [](const SnowCanvasShapeStyle* style) { return !validShapeStyleEnums(*style); }) ||
@@ -952,7 +986,7 @@ bool toEngineStyleDefaults(const SnowCanvasStyleDefaults& defaults,
     }
 
     if (!validDistanceStyle(defaults.distance) || !validAngleStyle(defaults.angle) ||
-        !validMagnifierStyle(defaults.magnifier))
+        !validBracketStyle(defaults.bracket) || !validMagnifierStyle(defaults.magnifier))
         return false;
     engineDefaults = SnowStyleDefaults{};
     engineDefaults.rectangle = toEngineShapeStyle(defaults.rectangle);
@@ -983,6 +1017,7 @@ bool toEngineStyleDefaults(const SnowCanvasStyleDefaults& defaults,
     engineDefaults.spotlight_corner_radii = toEngineCornerRadii(defaults.spotlightCornerRadii);
     engineDefaults.distance = toEngineDistanceStyle(defaults.distance);
     engineDefaults.angle = toEngineAngleStyle(defaults.angle);
+    engineDefaults.bracket = toEngineBracketStyle(defaults.bracket);
     engineDefaults.magnifier = toEngineMagnifierStyle(defaults.magnifier);
     return true;
 }

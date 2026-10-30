@@ -45,6 +45,7 @@ enum class SnowCanvasTool {
     Angle,
     Magnifier,
     SpeechBubble,
+    Bracket,
 };
 
 enum class SnowCanvasCursorLayer {
@@ -89,6 +90,8 @@ enum class SnowCanvasStyleToolbarSource {
     SelectedMagnifier,
     DefaultSpeechBubble,
     SelectedSpeechBubble,
+    DefaultBracket,
+    SelectedBracket,
 };
 
 enum SnowCanvasTextStyleMixedFlag : quint32 {
@@ -142,6 +145,8 @@ enum class SnowCanvasSerialNumberType : quint32 {
 enum class SnowCanvasBrushMode { Regular, PressureSensitive };
 
 enum SnowCanvasShapeStyleMixedFlag : quint32 {
+    SnowCanvasShapeStyleMixedArrowOutlineColor = 1u << 16,
+    SnowCanvasShapeStyleMixedArrowOutlineWidth = 1u << 17,
     SnowCanvasShapeStyleMixedStrokeRenderingStyle = 1u << 15,
     SnowCanvasShapeStyleMixedBrushMode = 1u << 14,
     SnowCanvasShapeStyleMixedFill = 1u << 0,
@@ -179,6 +184,8 @@ enum class SnowCanvasSelectionAlignment {
 };
 
 enum SnowCanvasShapeStyleProperty : quint32 {
+    SnowCanvasShapeStylePropertyArrowOutlineColor = 1u << 16,
+    SnowCanvasShapeStylePropertyArrowOutlineWidth = 1u << 17,
     SnowCanvasShapeStylePropertyStrokeRenderingStyle = 1u << 15,
     SnowCanvasShapeStylePropertyBrushMode = 1u << 14,
     SnowCanvasShapeStylePropertyFillColor = 1u << 0,
@@ -217,6 +224,7 @@ enum class SnowCanvasRectangleShape {
     Rectangle,
     Ellipse,
     Diamond,
+    ThoughtBubble = 3,
 };
 
 enum class SnowCanvasMagnifierConnectionType {
@@ -369,6 +377,17 @@ inline bool operator!=(const SnowCanvasCornerRadii& lhs, const SnowCanvasCornerR
     return !(lhs == rhs);
 }
 
+enum class SnowCanvasBracketStyleProperty : quint32 { Stroke = 1, StrokeWidth = 2, All = 3 };
+struct SnowCanvasBracketStyle {
+    QColor stroke = QColor(0xf5, 0x22, 0x2d);
+    double strokeWidth = 2.0;
+};
+inline bool operator==(const SnowCanvasBracketStyle& lhs, const SnowCanvasBracketStyle& rhs) {
+    return lhs.stroke == rhs.stroke && snowCanvasExactDoubleEqual(lhs.strokeWidth, rhs.strokeWidth);
+}
+inline bool operator!=(const SnowCanvasBracketStyle& lhs, const SnowCanvasBracketStyle& rhs) {
+    return !(lhs == rhs);
+}
 enum class SnowCanvasAngleUnit { Degrees, Radians };
 enum class SnowCanvasAngleType { Directed, Interior };
 
@@ -399,7 +418,7 @@ inline bool operator!=(const SnowCanvasAngleStyle& lhs, const SnowCanvasAngleSty
     return !(lhs == rhs);
 }
 
-enum class SnowCanvasDistanceUnit { Px, Cm, M, Km, Mm };
+enum class SnowCanvasDistanceUnit { Px, Cm, M, Km, Mm, Pt, In, Ft, Um };
 
 enum SnowCanvasDistanceStyleProperty : quint32 {
     SnowCanvasDistanceStylePropertyStrokeColor = 1u << 0,
@@ -459,6 +478,8 @@ struct SnowCanvasShapeStyle {
     SnowCanvasRectangleShape shape = SnowCanvasRectangleShape::Rectangle;
     SnowCanvasBrushMode brushMode = SnowCanvasBrushMode::Regular;
     SnowCanvasStrokeRenderingStyle strokeRenderingStyle = SnowCanvasStrokeRenderingStyle::Architect;
+    QColor arrowOutlineColor{0xff, 0xcc, 0xc7};
+    double arrowOutlineWidth = 0.0;
 };
 
 struct SnowCanvasMagnifierStyle {
@@ -487,7 +508,9 @@ inline bool operator!=(const SnowCanvasMagnifierStyle& lhs, const SnowCanvasMagn
 }
 
 inline bool operator==(const SnowCanvasShapeStyle& lhs, const SnowCanvasShapeStyle& rhs) {
-    return lhs.fill == rhs.fill && lhs.fillStyle == rhs.fillStyle && lhs.stroke == rhs.stroke &&
+    return lhs.arrowOutlineColor == rhs.arrowOutlineColor &&
+           snowCanvasExactDoubleEqual(lhs.arrowOutlineWidth, rhs.arrowOutlineWidth) &&
+           lhs.fill == rhs.fill && lhs.fillStyle == rhs.fillStyle && lhs.stroke == rhs.stroke &&
            snowCanvasExactDoubleEqual(lhs.strokeWidth, rhs.strokeWidth) &&
            lhs.cornerRadii == rhs.cornerRadii && lhs.startArrowhead == rhs.startArrowhead &&
            lhs.endArrowhead == rhs.endArrowhead && lhs.strokeStyle == rhs.strokeStyle &&
@@ -595,10 +618,14 @@ struct SnowCanvasArrowStyle {
     SnowCanvasArrowShaftType arrowShaftType = SnowCanvasArrowShaftType::Plain;
     double arrowRatio = 1.0;
     SnowCanvasStrokeRenderingStyle strokeRenderingStyle = SnowCanvasStrokeRenderingStyle::Architect;
+    QColor arrowOutlineColor{0xff, 0xcc, 0xc7};
+    double arrowOutlineWidth = 0.0;
 };
 
 inline bool operator==(const SnowCanvasArrowStyle& lhs, const SnowCanvasArrowStyle& rhs) {
-    return lhs.stroke == rhs.stroke &&
+    return lhs.arrowOutlineColor == rhs.arrowOutlineColor &&
+           snowCanvasExactDoubleEqual(lhs.arrowOutlineWidth, rhs.arrowOutlineWidth) &&
+           lhs.stroke == rhs.stroke &&
            snowCanvasExactDoubleEqual(lhs.strokeWidth, rhs.strokeWidth) &&
            lhs.startArrowhead == rhs.startArrowhead && lhs.endArrowhead == rhs.endArrowhead &&
            lhs.strokeStyle == rhs.strokeStyle && lhs.arrowType == rhs.arrowType &&
@@ -692,6 +719,7 @@ struct SnowCanvasStyleDefaults {
     SnowCanvasCornerRadii spotlightCornerRadii;
     SnowCanvasDistanceStyle distance;
     SnowCanvasAngleStyle angle;
+    SnowCanvasBracketStyle bracket;
     SnowCanvasMagnifierStyle magnifier;
     SnowCanvasShapeStyle speechBubble = [] {
         SnowCanvasShapeStyle style;
@@ -712,7 +740,7 @@ inline bool operator==(const SnowCanvasStyleDefaults& lhs, const SnowCanvasStyle
            lhs.spotlight == rhs.spotlight && lhs.brushEraser == rhs.brushEraser &&
            lhs.spotlightShape == rhs.spotlightShape &&
            lhs.spotlightCornerRadii == rhs.spotlightCornerRadii && lhs.distance == rhs.distance &&
-           lhs.angle == rhs.angle && lhs.magnifier == rhs.magnifier &&
+           lhs.angle == rhs.angle && lhs.bracket == rhs.bracket && lhs.magnifier == rhs.magnifier &&
            lhs.speechBubble == rhs.speechBubble;
 }
 
@@ -745,7 +773,9 @@ struct SnowCanvasStyleToolbarState {
     SnowCanvasDistanceStyle distanceStyle;
     quint32 distanceStyleMixed = 0;
     SnowCanvasAngleStyle angleStyle;
+    SnowCanvasBracketStyle bracketStyle;
     quint32 angleStyleMixed = 0;
+    quint32 bracketStyleMixed = 0;
     // Calibrated length before applying the factor; zero without a single valid distance.
     double distanceMeasuredLength = 0.0;
     SnowCanvasMagnifierStyle magnifierStyle;
@@ -764,7 +794,8 @@ inline bool operator==(const SnowCanvasStyleToolbarState& lhs,
            lhs.filterStyleMixed == rhs.filterStyleMixed &&
            lhs.brushEraserStyle == rhs.brushEraserStyle && lhs.distanceStyle == rhs.distanceStyle &&
            lhs.distanceStyleMixed == rhs.distanceStyleMixed && lhs.angleStyle == rhs.angleStyle &&
-           lhs.angleStyleMixed == rhs.angleStyleMixed &&
+           lhs.angleStyleMixed == rhs.angleStyleMixed && lhs.bracketStyle == rhs.bracketStyle &&
+           lhs.bracketStyleMixed == rhs.bracketStyleMixed &&
            lhs.distanceMeasuredLength == rhs.distanceMeasuredLength &&
            lhs.magnifierStyle == rhs.magnifierStyle &&
            lhs.magnifierStyleMixed == rhs.magnifierStyleMixed;

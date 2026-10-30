@@ -58,6 +58,7 @@ inline const QHash<QString, SnowCanvasTool>& mcpCanvasTools() {
         {QStringLiteral("arrow"), SnowCanvasTool::Arrow},
         {QStringLiteral("distance"), SnowCanvasTool::Distance},
         {QStringLiteral("angle"), SnowCanvasTool::Angle},
+        {QStringLiteral("bracket"), SnowCanvasTool::Bracket},
         {QStringLiteral("magnifier"), SnowCanvasTool::Magnifier},
         {QStringLiteral("line"), SnowCanvasTool::Line},
         {QStringLiteral("freehand"), SnowCanvasTool::FreeDraw},
@@ -85,14 +86,18 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
         target == QStringLiteral("angle")
             ? QStringList{QStringLiteral("degrees"), QStringLiteral("radians")}
             : QStringList{QStringLiteral("px"), QStringLiteral("cm"), QStringLiteral("m"),
-                          QStringLiteral("km"), QStringLiteral("mm")};
+                          QStringLiteral("km"), QStringLiteral("mm"), QStringLiteral("pt"),
+                          QStringLiteral("in"), QStringLiteral("ft"), QStringLiteral("um")};
+    QStringList shapes{QStringLiteral("rectangle"), QStringLiteral("ellipse"),
+                       QStringLiteral("diamond")};
+    if (target == QStringLiteral("speech_bubble"))
+        shapes.append(QStringLiteral("thought_bubble"));
     const QHash<QString, QStringList> enums{
         {QStringLiteral("unit"), units},
         {QStringLiteral("angle_type"), {QStringLiteral("directed"), QStringLiteral("interior")}},
         {QStringLiteral("connection_type"),
          {QStringLiteral("none"), QStringLiteral("leader_line"), QStringLiteral("gradient")}},
-        {QStringLiteral("shape"),
-         {QStringLiteral("rectangle"), QStringLiteral("ellipse"), QStringLiteral("diamond")}},
+        {QStringLiteral("shape"), shapes},
         {QStringLiteral("fill_style"),
          {QStringLiteral("line"), QStringLiteral("cross_line"), QStringLiteral("solid"),
           QStringLiteral("border")}},
@@ -125,10 +130,11 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
           QStringLiteral("diamond_outline"), QStringLiteral("crowfoot_one"),
           QStringLiteral("crowfoot_many"), QStringLiteral("crowfoot_one_or_many"),
           QStringLiteral("indented_triangle")}}};
-    const QStringList colors{QStringLiteral("stroke"), QStringLiteral("fill"),
-                             QStringLiteral("color")};
+    const QStringList colors{QStringLiteral("arrow_outline_color"), QStringLiteral("stroke"),
+                             QStringLiteral("fill"), QStringLiteral("color")};
     const QStringList textFields{QStringLiteral("text"), QStringLiteral("font_family")};
-    const QStringList numbers{QStringLiteral("stroke_width"),
+    const QStringList numbers{QStringLiteral("arrow_outline_width"),
+                              QStringLiteral("stroke_width"),
                               QStringLiteral("font_size"),
                               QStringLiteral("opacity"),
                               QStringLiteral("corner_radius"),
@@ -183,6 +189,8 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
                    QStringLiteral("factor"),         QStringLiteral("unit"),
                    QStringLiteral("decimal_places"), QStringLiteral("endpoint_scale"),
                    QStringLiteral("endpoint_style")};
+    else if (target == QStringLiteral("bracket"))
+        allowed = {QStringLiteral("stroke"), QStringLiteral("stroke_width")};
     else if (target == QStringLiteral("angle"))
         allowed = {QStringLiteral("stroke"), QStringLiteral("stroke_width"), QStringLiteral("unit"),
                    QStringLiteral("decimal_places"), QStringLiteral("angle_type")};
@@ -198,10 +206,16 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
                    QStringLiteral("corner_radius"),
                    QStringLiteral("corner_radii")};
     else if (target == QStringLiteral("arrow"))
-        allowed = {QStringLiteral("stroke"),           QStringLiteral("stroke_width"),
-                   QStringLiteral("stroke_style"),     QStringLiteral("start_arrowhead"),
-                   QStringLiteral("end_arrowhead"),    QStringLiteral("arrow_type"),
-                   QStringLiteral("arrow_shaft_type"), QStringLiteral("arrow_ratio")};
+        allowed = {QStringLiteral("stroke"),
+                   QStringLiteral("stroke_width"),
+                   QStringLiteral("stroke_style"),
+                   QStringLiteral("start_arrowhead"),
+                   QStringLiteral("end_arrowhead"),
+                   QStringLiteral("arrow_type"),
+                   QStringLiteral("arrow_shaft_type"),
+                   QStringLiteral("arrow_ratio"),
+                   QStringLiteral("arrow_outline_color"),
+                   QStringLiteral("arrow_outline_width")};
     else if (target == QStringLiteral("line") || target == QStringLiteral("freehand")) {
         allowed = {QStringLiteral("fill"),         QStringLiteral("stroke"),
                    QStringLiteral("stroke_width"), QStringLiteral("fill_style"),
@@ -215,8 +229,9 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
         allowed = {QStringLiteral("stroke"), QStringLiteral("stroke_width")};
     else
         return false;
-    if (target == QStringLiteral("rectangle") || target == QStringLiteral("arrow") ||
-        target == QStringLiteral("line") || target == QStringLiteral("serial_number")) {
+    if (target == QStringLiteral("rectangle") || target == QStringLiteral("speech_bubble") ||
+        target == QStringLiteral("arrow") || target == QStringLiteral("line") ||
+        target == QStringLiteral("serial_number")) {
         allowed.append(QStringLiteral("stroke_rendering_style"));
     }
     if (patch.contains(QStringLiteral("corner_radius")) &&
@@ -256,6 +271,8 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
             if (!it->isDouble() || !std::isfinite(value) || value > maximum ||
                 value < (it.key() == QStringLiteral("angle") ? -360 : 0))
                 return false;
+            if (it.key() == QStringLiteral("arrow_outline_width") && value > 72)
+                return false;
             if (it.key() == QStringLiteral("number") && std::floor(value) != value)
                 return false;
             if ((it.key() == QStringLiteral("arrow_ratio") ||
@@ -271,7 +288,8 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
             if (it.key() == QStringLiteral("decimal_places") &&
                 (value > 3 || std::floor(value) != value))
                 return false;
-            if ((target == QStringLiteral("distance") || target == QStringLiteral("angle")) &&
+            if ((target == QStringLiteral("distance") || target == QStringLiteral("bracket") ||
+                 target == QStringLiteral("angle")) &&
                 it.key() == QStringLiteral("stroke_width") && (value < 1 || value > 72))
                 return false;
         } else {
@@ -365,6 +383,22 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
             return canvas.commitStyleEdit(SnowCanvasMagnifierEdit{style, flags, editTarget});
         else
             return canvas.setMagnifierStyleFromToolbar(style, flags, creationDefaults);
+    } else if (target == QStringLiteral("bracket")) {
+        auto style = state.bracketStyle;
+        style.stroke = color("stroke", style.stroke);
+        style.strokeWidth = number("stroke_width", style.strokeWidth);
+        const quint32 flags = (patch.contains(QStringLiteral("stroke")) ? 1u : 0u) |
+                              (patch.contains(QStringLiteral("stroke_width")) ? 2u : 0u);
+        const auto editTarget = state.source == SnowCanvasStyleToolbarSource::SelectedBracket
+                                    ? SnowCanvasStyleEditTarget::Selection
+                                    : SnowCanvasStyleEditTarget::Creation;
+        if constexpr (requires {
+                          canvas.commitStyleEdit(
+                              SnowCanvasBracketStyleEdit{style, flags, editTarget});
+                      })
+            return canvas.commitStyleEdit(SnowCanvasBracketStyleEdit{style, flags, editTarget});
+        else
+            return canvas.setBracketStyleFromToolbar(style, flags);
     } else if (target == QStringLiteral("angle")) {
         auto style = state.angleStyle;
         style.angleType = static_cast<SnowCanvasAngleType>(
@@ -572,6 +606,8 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
             enumeration("arrow_type", static_cast<int>(style.arrowType)));
         style.arrowShaftType = static_cast<SnowCanvasArrowShaftType>(
             enumeration("arrow_shaft_type", static_cast<int>(style.arrowShaftType)));
+        style.arrowOutlineColor = color("arrow_outline_color", style.arrowOutlineColor);
+        style.arrowOutlineWidth = number("arrow_outline_width", style.arrowOutlineWidth);
         style.arrowRatio = number("arrow_ratio", style.arrowRatio);
         style.cornerRadii = cornerRadii(style.cornerRadii);
         const QHash<QString, quint32> properties{
@@ -590,6 +626,8 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
             {QStringLiteral("end_arrowhead"), SnowCanvasShapeStylePropertyEndArrowhead},
             {QStringLiteral("arrow_type"), SnowCanvasShapeStylePropertyArrowType},
             {QStringLiteral("arrow_shaft_type"), SnowCanvasShapeStylePropertyArrowShaftType},
+            {QStringLiteral("arrow_outline_color"), SnowCanvasShapeStylePropertyArrowOutlineColor},
+            {QStringLiteral("arrow_outline_width"), SnowCanvasShapeStylePropertyArrowOutlineWidth},
             {QStringLiteral("arrow_ratio"), SnowCanvasShapeStylePropertyArrowRatio}};
         quint32 flags = 0;
         for (auto it = patch.begin(); it != patch.end(); ++it)

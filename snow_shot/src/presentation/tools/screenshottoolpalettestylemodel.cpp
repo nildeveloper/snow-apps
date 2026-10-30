@@ -39,6 +39,8 @@ void ScreenshotToolPaletteStyleState::reset(const SnowCanvasStyleDefaults& defau
         defaults.arrow.arrowShaftType, defaults.arrow.arrowRatio,
     };
     m_creationArrowStyle.strokeRenderingStyle = defaults.arrow.strokeRenderingStyle;
+    m_creationArrowStyle.arrowOutlineColor = defaults.arrow.arrowOutlineColor;
+    m_creationArrowStyle.arrowOutlineWidth = defaults.arrow.arrowOutlineWidth;
     m_arrowStyle = m_creationArrowStyle;
     creationDistanceStyle = defaults.distance;
     distanceStyle = defaults.distance;
@@ -46,14 +48,19 @@ void ScreenshotToolPaletteStyleState::reset(const SnowCanvasStyleDefaults& defau
     distanceMeasuredLength = 0.0;
     showingSelectedDistance = false;
     creationAngleStyle = defaults.angle;
+    creationBracketStyle = defaults.bracket;
     angleStyle = defaults.angle;
+    bracketStyle = defaults.bracket;
     angleStyleMixed = 0;
+    bracketStyleMixed = 0;
     showingSelectedAngle = false;
+    showingSelectedBracket = false;
     creationMagnifierStyle = defaults.magnifier;
     magnifierStyle = defaults.magnifier;
     magnifierStyleMixed = 0;
     showingSelectedMagnifier = false;
     angleControlsActive = false;
+    bracketControlsActive = false;
     m_creationTextStyle.setTextStyle(defaults.text);
     m_textStyle.setTextStyle(defaults.text);
     m_creationSerialNumberStyle = defaults.serialNumber;

@@ -32,6 +32,7 @@
 #include "snow_canvas_widget_text_interaction.h"
 #include "snow_draw_engine_qt/snow_canvas_custom_renderer.h"
 #include "snow_draw_engine_qt/snow_canvas_runtime.h"
+#include "snow_draw_engine_qt/snow_canvas_image.h"
 #include "snow_draw_engine_qt/snow_canvas_wheel_input.h"
 
 #include <QBitmap>
@@ -84,6 +85,7 @@ std::optional<SnowCursorStyle> baselineCursorForCanvasTool(SnowCanvasTool tool) 
     case SnowCanvasTool::SpeechBubble:
     case SnowCanvasTool::Arrow:
     case SnowCanvasTool::Distance:
+    case SnowCanvasTool::Bracket:
     case SnowCanvasTool::Angle:
     case SnowCanvasTool::Magnifier:
     case SnowCanvasTool::Line:
@@ -185,7 +187,8 @@ bool magnifierSamplesDamage(const SnowCanvasSceneItem& item,
 std::uint64_t sceneCacheContentKey(const SceneDisplayInfo& sceneInfo,
                                    const SnowCanvasCustomRenderer* customRenderer,
                                    bool clearBackgroundEnabled, double devicePixelRatio,
-                                   const QSize& widgetSize) {
+                                   const QSize& widgetSize,
+                                   SnowCanvasRenderContext::Purpose purpose) {
     std::size_t key = 1469598103934665603ull;
     const auto hashCombine = [&key](std::size_t value) {
         key ^= value;
@@ -208,6 +211,7 @@ std::uint64_t sceneCacheContentKey(const SceneDisplayInfo& sceneInfo,
     hashCombine(std::hash<double>{}(devicePixelRatio));
     hashCombine(static_cast<std::size_t>(widgetSize.width()));
     hashCombine(static_cast<std::size_t>(widgetSize.height()));
+    hashCombine(static_cast<std::size_t>(purpose));
     return static_cast<std::uint64_t>(key);
 }
 
@@ -432,6 +436,7 @@ struct SnowCanvasWidget::Impl : public snow_canvas_runtime::Client {
     SnowCanvasStyleToolbarState canvasStyleToolbarState() const;
     bool setCanvasDistanceStyle(const SnowCanvasDistanceStyle& style, quint32 properties);
     bool setCanvasAngleStyle(const SnowCanvasAngleStyle& style, quint32 properties);
+    bool setCanvasBracketStyle(const SnowCanvasBracketStyle& style, quint32 properties);
     bool setCanvasMagnifierStyle(const SnowCanvasMagnifierStyle& style, quint32 properties,
                                  bool creationDefaults);
     bool adjustAngleValue(double deltaRadians);
@@ -538,9 +543,11 @@ struct SnowCanvasWidget::Impl : public snow_canvas_runtime::Client {
     bool beginSelectedText(const QPointF& viewPosition, bool requireSerialBoundText);
 
     void paintEvent(QPaintEvent* event);
-    bool paint(QPainter& painter, const QRegion& exposedRegion);
+    bool paint(QPainter& painter, const QRegion& exposedRegion,
+               SnowCanvasRenderContext::Purpose purpose = SnowCanvasRenderContext::Purpose::Widget);
     snow_canvas_compositor::Frame buildPaintFrame() const;
-    SnowCanvasRenderContext renderContext(QPainter& painter, const QRegion& exposedRegion) const;
+    SnowCanvasRenderContext renderContext(QPainter& painter, const QRegion& exposedRegion,
+                                          SnowCanvasRenderContext::Purpose purpose) const;
     void renderBeforeCanvas(QPainter& painter, const SnowCanvasRenderContext& context) const;
     void renderAfterCanvas(QPainter& painter, const SnowCanvasRenderContext& context) const;
     bool canBeginPointerInteraction(const QMouseEvent& event) const;
@@ -743,10 +750,12 @@ bool SnowCanvasWidget::Impl::prepareActiveTextResizeMeasurementForPointerUp(
     }
     const auto tool = canvasTool();
     const bool geometryTool = tool == SnowCanvasTool::Select || tool == SnowCanvasTool::Arrow ||
-                              tool == SnowCanvasTool::Distance || tool == SnowCanvasTool::Angle ||
-                              tool == SnowCanvasTool::Shape || tool == SnowCanvasTool::SpeechBubble;
+                              tool == SnowCanvasTool::Distance || tool == SnowCanvasTool::Bracket ||
+                              tool == SnowCanvasTool::Angle || tool == SnowCanvasTool::Shape ||
+                              tool == SnowCanvasTool::SpeechBubble;
     if (!state.active &&
-        (!geometryTool || (tool != SnowCanvasTool::Distance && tool != SnowCanvasTool::Angle &&
+        (!geometryTool || (tool != SnowCanvasTool::Distance && tool != SnowCanvasTool::Bracket &&
+                           tool != SnowCanvasTool::Angle &&
                            snow_runtime_arrow_text_count(runtimeBinding.engine()) == 0 &&
                            snow_runtime_speech_bubble_text_count(runtimeBinding.engine()) == 0))) {
         return true;
@@ -1132,13 +1141,27 @@ SnowCanvasAngleStyle SnowCanvasWidget::canvasAngleStyle() const {
     return canvasStyleToolbarState().angleStyle;
 }
 
+SnowCanvasBracketStyle SnowCanvasWidget::canvasBracketStyle() const {
+    return canvasStyleToolbarState().bracketStyle;
+}
+
 bool SnowCanvasWidget::setCanvasAngleStyle(const SnowCanvasAngleStyle& style, quint32 properties) {
     return m_impl->setCanvasAngleStyle(style, properties);
+}
+
+bool SnowCanvasWidget::setCanvasBracketStyle(const SnowCanvasBracketStyle& style,
+                                             quint32 properties) {
+    return m_impl->setCanvasBracketStyle(style, properties);
 }
 
 bool SnowCanvasWidget::setCanvasAngleStylePatch(const SnowCanvasAngleStyle& style,
                                                 quint32 properties) {
     return setCanvasAngleStyle(style, properties);
+}
+
+bool SnowCanvasWidget::setCanvasBracketStylePatch(const SnowCanvasBracketStyle& style,
+                                                  quint32 properties) {
+    return setCanvasBracketStyle(style, properties);
 }
 
 bool SnowCanvasWidget::Impl::setCanvasAngleStyle(const SnowCanvasAngleStyle& style,
@@ -1149,6 +1172,17 @@ bool SnowCanvasWidget::Impl::setCanvasAngleStyle(const SnowCanvasAngleStyle& sty
         return snow_canvas_commands::setAngleStylePatch(
             runtimeBinding.engine(), runtimeBinding.viewportHandle(),
             snow_canvas_types::toEngineAngleStyle(style), properties);
+    });
+}
+
+bool SnowCanvasWidget::Impl::setCanvasBracketStyle(const SnowCanvasBracketStyle& style,
+                                                   quint32 properties) {
+    if (!snow_canvas_types::validBracketStyle(style))
+        return false;
+    return applyMutation([&]() {
+        return snow_canvas_commands::setBracketStylePatch(
+            runtimeBinding.engine(), runtimeBinding.viewportHandle(),
+            snow_canvas_types::toEngineBracketStyle(style), properties);
     });
 }
 
@@ -3083,7 +3117,8 @@ void SnowCanvasWidget::Impl::paintEvent(QPaintEvent* event) {
     paint(painter, exposedRegion);
 }
 
-bool SnowCanvasWidget::Impl::paint(QPainter& painter, const QRegion& exposedRegion) {
+bool SnowCanvasWidget::Impl::paint(QPainter& painter, const QRegion& exposedRegion,
+                                   SnowCanvasRenderContext::Purpose purpose) {
     if (!hasExposedRect(exposedRegion, widget.rect())) {
         return false;
     }
@@ -3098,7 +3133,7 @@ bool SnowCanvasWidget::Impl::paint(QPainter& painter, const QRegion& exposedRegi
                             Qt::IntersectClip);
     snow_canvas_compositor::Frame frame = buildPaintFrame();
     if (canvasContentIsVisible) {
-        const SnowCanvasRenderContext tileContext = renderContext(painter, exposedRegion);
+        const SnowCanvasRenderContext tileContext = renderContext(painter, exposedRegion, purpose);
         const QList<SnowCanvasBaseImageSource> baseImageSources =
             installedCustomRenderer != nullptr ? installedCustomRenderer->baseImageSources()
                                                : QList<SnowCanvasBaseImageSource>{};
@@ -3145,7 +3180,7 @@ bool SnowCanvasWidget::Impl::paint(QPainter& painter, const QRegion& exposedRegi
         if (!referenceRendered) {
             sceneRequest.filterTileContentKey = sceneCacheContentKey(
                 cache.sceneInfo(), installedCustomRenderer, canvasClearBackgroundEnabled,
-                painterDevicePixelRatio(painter, widget), widget.size());
+                painterDevicePixelRatio(painter, widget), widget.size(), purpose);
             if (!hasFilter(frame.sceneItems, frame.sceneItemCount)) {
                 snow_canvas_compositor::clearSurface(painter, frame);
                 renderBeforeCanvas(painter, tileContext);
@@ -3158,20 +3193,20 @@ bool SnowCanvasWidget::Impl::paint(QPainter& painter, const QRegion& exposedRegi
         snow_canvas_compositor::renderDocumentDecorations(painter, frame);
         painter.restore();
     } else {
-        const SnowCanvasRenderContext context = renderContext(painter, exposedRegion);
+        const SnowCanvasRenderContext context = renderContext(painter, exposedRegion, purpose);
         snow_canvas_compositor::clearSurface(painter, frame);
         renderBeforeCanvas(painter, context);
     }
     painter.restore();
     // The image bounds constrain document pixels, while selection controls and
     // inline editing affordances must remain visible beyond those bounds.
-    if (canvasContentIsVisible) {
+    if (canvasContentIsVisible && purpose == SnowCanvasRenderContext::Purpose::Widget) {
         painter.save();
         snow_canvas_compositor::renderEditorOverlays(painter, frame);
         textInteraction.renderEditorOverlay(painter, widget.font(), cache);
         painter.restore();
     }
-    const SnowCanvasRenderContext context = renderContext(painter, exposedRegion);
+    const SnowCanvasRenderContext context = renderContext(painter, exposedRegion, purpose);
     renderAfterCanvas(painter, context);
 
     return true;
@@ -3209,14 +3244,16 @@ void SnowCanvasWidget::Impl::updateWatermarkPresentationInfo() const {
     }
 }
 
-SnowCanvasRenderContext SnowCanvasWidget::Impl::renderContext(QPainter& painter,
-                                                              const QRegion& exposedRegion) const {
+SnowCanvasRenderContext
+SnowCanvasWidget::Impl::renderContext(QPainter& painter, const QRegion& exposedRegion,
+                                      SnowCanvasRenderContext::Purpose purpose) const {
     const SceneDisplayInfo& sceneInfo = displayState.displayCache().sceneInfo();
     return SnowCanvasRenderContext{
         widget.rect(),
         exposedRegion.intersected(widget.rect()),
         ::canvasToViewTransform(sceneInfo),
         painterDevicePixelRatio(painter, widget),
+        purpose,
     };
 }
 
@@ -3242,6 +3279,27 @@ void SnowCanvasWidget::Impl::renderAfterCanvas(QPainter& painter,
 
 void SnowCanvasWidget::paintEvent(QPaintEvent* event) {
     m_impl->paintEvent(event);
+}
+
+QImage SnowCanvasWidget::renderContentToImage(const QSize& physicalSize) {
+    if (physicalSize.isEmpty() || size().isEmpty() || !m_impl->hasViewport())
+        return {};
+    QImage image = snowCanvasAllocateZeroedImage(physicalSize, QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull())
+        return {};
+    const qreal scaleX = qreal(physicalSize.width()) / width();
+    const qreal scaleY = qreal(physicalSize.height()) / height();
+    const qreal dpr = qMax(scaleX, scaleY);
+    image.setDevicePixelRatio(dpr);
+    {
+        QPainter painter(&image);
+        painter.scale(scaleX / dpr, scaleY / dpr);
+        if (!m_impl->paint(painter, QRegion(rect()),
+                           SnowCanvasRenderContext::Purpose::ContentSnapshot))
+            return {};
+    }
+    image.setDevicePixelRatio(1.0);
+    return image;
 }
 
 bool SnowCanvasWidget::event(QEvent* event) {
@@ -3359,9 +3417,21 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event,
     restoredSelectionForNextTextToolPress = false;
     bool canDispatchAfterTextCommit = true;
     if (plan.shouldCommitTextEditor) {
+        const bool dismissSelection =
+            event->button() == Qt::LeftButton && !plan.shouldRestoreSelectionOnCommit &&
+            displayState.snapshot().styleToolbarState.selected_element_count != 0;
         const SnowCanvasWidgetTextInteraction::CommitResult commitResult =
             commitText(true, plan.shouldRestoreSelectionOnCommit);
         if (!lifetime) {
+            return false;
+        }
+        // Bound-label commits retain selection for keyboard and focus workflows.
+        // An outside click also dismisses the selection that existed before the
+        // commit, without overriding automatic selection of newly created text.
+        if (dismissSelection && !applyMutation([&]() {
+                return snow_canvas_commands::clearSelection(runtimeBinding.engine(),
+                                                            runtimeBinding.viewportHandle());
+            })) {
             return false;
         }
         if (plan.dispatchAfterCommitRequiresRestoredSelection) {
@@ -4045,6 +4115,13 @@ bool SnowCanvasWidget::Impl::applyStyleEdit(const SnowCanvasStyleEdit& edit) {
                 if ((patch.target == SnowCanvasStyleEditTarget::Selection) != editsSelection)
                     return false;
                 return widget.setCanvasAngleStyle(patch.style, patch.properties);
+            } else if constexpr (std::is_same_v<T, SnowCanvasBracketStyleEdit>) {
+                const bool editsSelection = canvasStyleToolbarState().source ==
+                                            SnowCanvasStyleToolbarSource::SelectedBracket;
+                // A delayed editor patch must still target the same kind of style.
+                if ((patch.target == SnowCanvasStyleEditTarget::Selection) != editsSelection)
+                    return false;
+                return widget.setCanvasBracketStyle(patch.style, patch.properties);
             } else if constexpr (std::is_same_v<T, SnowCanvasMagnifierEdit>) {
                 if (patch.target == SnowCanvasStyleEditTarget::Selection &&
                     canvasStyleToolbarState().source !=

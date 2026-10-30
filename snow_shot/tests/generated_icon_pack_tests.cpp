@@ -2,6 +2,7 @@
 #include "snow_shot/presentation/components/icons/snowshoticons.h"
 
 #include "icon_renderer.h"
+#include "antd_icons.h"
 
 #include <QApplication>
 #include <QColor>
@@ -97,8 +98,20 @@ void everySnowShotEntryRenders() {
     const auto registered = icons::registerWith(renderer);
     require(registered.ok(), "Snow Shot pack registration should succeed");
     const adqt::icons::IconPack* staticPack = icons::pack().staticPack();
-    require(staticPack != nullptr && staticPack->entryCount == 199,
-            "Snow Shot pack should contain all 199 project-owned assets");
+    require(staticPack != nullptr && staticPack->entryCount == 204,
+            "Snow Shot pack should contain all 204 project-owned assets");
+    require(adqt::icons::describeIcon(icons::outlined::PinWindowToScreen()).key.name ==
+                QStringLiteral("pin-window-to-screen"),
+            "live window pinning should resolve to its project-owned icon");
+    require(adqt::icons::describeIcon(icons::outlined::PinToScreenManagement()).key.name ==
+                QStringLiteral("pin-to-screen-management"),
+            "pin management should resolve to its project-owned icon");
+    require(adqt::icons::describeIcon(icons::outlined::BracketAnnotation()).key.name ==
+                QStringLiteral("bracket-annotation"),
+            "bracket annotation should resolve to its project-owned icon");
+    require(adqt::icons::describeIcon(icons::outlined::TextType()).key.name ==
+                QStringLiteral("text-type"),
+            "recognition and translation switching should resolve to its project-owned icon");
 
     adqt::icons::IconRenderRequest request;
     request.logicalSize = QSize(32, 32);
@@ -126,6 +139,60 @@ void everySnowShotEntryRenders() {
         std::cerr << warning.toStdString() << '\n';
     require(renderWarnings.isEmpty(),
             "every Snow Shot icon must render without missing images or undefined references");
+}
+
+void airDropIconFollowsAntDesign() {
+    namespace icons = snow_shot::presentation::icons::custom;
+    for (const QColor color : {QColor(35, 35, 35), QColor(240, 240, 240)}) {
+        const auto icon = icons::outlined::AirDrop(adqt::icons::IconColors::primary(color));
+        require(adqt::icons::describeIcon(icon).colorModel ==
+                    adqt::icons::IconColorModel::Monochrome,
+                "AirDrop uses the monochrome theme pipeline");
+        for (int size : {16, 20, 24, 32}) {
+            for (qreal dpr : {1.0, 1.25, 2.0}) {
+                const auto image = render(icon, QSize(size, size), dpr).toImage();
+                const auto bounds = alphaBounds(image);
+                require(!bounds.isEmpty() && bounds.left() > 0 &&
+                            bounds.right() < image.width() - 1 && bounds.top() > 0 &&
+                            bounds.bottom() < image.height(),
+                        "AirDrop stays legible and unclipped at toolbar sizes and fractional DPR");
+                require(std::abs(bounds.center().x() - image.rect().center().x()) <= 1,
+                        "AirDrop remains optically centered");
+                if (size >= 24)
+                    require(containsOpaqueColor(image, color),
+                            "AirDrop follows the requested theme color");
+            }
+        }
+    }
+    const QString previewPath = qEnvironmentVariable("SNOW_AIRDROP_ICON_PREVIEW");
+    if (!previewPath.isEmpty()) {
+        QImage preview(560, 180, QImage::Format_ARGB32_Premultiplied);
+        QPainter painter(&preview);
+        for (int row = 0; row < 2; ++row) {
+            painter.fillRect(0, row * 90, 560, 90, row ? QColor(30, 30, 30) : QColor(Qt::white));
+            const QColor color = row ? QColor(240, 240, 240) : QColor(35, 35, 35);
+            painter.setPen(color);
+            int x = 20;
+            for (int size : {16, 20, 24, 32}) {
+                painter.drawText(x, row * 90 + 20, QString::number(size) + QStringLiteral(" px"));
+                painter.drawPixmap(
+                    x, row * 90 + 36,
+                    render(icons::outlined::Save(adqt::icons::IconColors::primary(color)),
+                           QSize(size, size)));
+                painter.drawPixmap(x + 40, row * 90 + 36,
+                                   render(adqt::icons::antd::outlined::Printer(
+                                              adqt::icons::IconColors::primary(color)),
+                                          QSize(size, size)));
+                painter.drawPixmap(
+                    x + 80, row * 90 + 36,
+                    render(icons::outlined::AirDrop(adqt::icons::IconColors::primary(color)),
+                           QSize(size, size)));
+                x += 135;
+            }
+        }
+        painter.end();
+        require(preview.save(previewPath), "save AirDrop toolbar icon preview");
+    }
 }
 
 void recaptureIconUsesThemeColor() {
@@ -589,6 +656,71 @@ void spreadsheetIconFollowsAntDesign() {
         require(preview.save(path), "save spreadsheet icon visual inspection sheet");
 }
 
+void thoughtBubbleIconFollowsAntDesign() {
+    namespace icons = snow_shot::presentation::icons::custom;
+    const auto ref = icons::outlined::ShapeThoughtBubble();
+    const auto* descriptor = ref.descriptor();
+    require(descriptor && descriptor->colorModel == adqt::icons::IconColorModel::Monochrome,
+            "thought bubble uses the monochrome theme pipeline");
+    const QByteArray svg(descriptor->svg.data(), static_cast<qsizetype>(descriptor->svg.size()));
+    require(svg.contains("viewBox=\"0 0 1024 1024\"") && svg.contains("stroke-width=\"72\"") &&
+                svg.contains("__ADQT_SLOT_PRIMARY__"),
+            "thought bubble follows the Ant Design grid and outline weight");
+    const QRect bounds = alphaBounds(render(ref, QSize(1024, 1024)).toImage());
+    require(bounds.left() >= 64 && bounds.top() >= 64 && bounds.right() < 960 &&
+                bounds.bottom() < 960,
+            "thought bubble keeps the Ant Design safe margin");
+    QImage preview(440, 256, QImage::Format_ARGB32_Premultiplied);
+    preview.fill(Qt::white);
+    QPainter painter(&preview);
+    const QList<QColor> colors{QColor("#262626"), QColor("#f0f0f0"), QColor("#1677ff"),
+                               QColor("#bfbfbf")};
+    for (int row = 0; row < colors.size(); ++row) {
+        const QColor color = colors[row];
+        painter.fillRect(QRect(0, row * 64, 440, 64), row == 1 ? QColor("#141414") : Qt::white);
+        int column = 0;
+        for (int size : {14, 16, 20, 32}) {
+            for (qreal dpr : {1.0, 1.25, 1.5, 2.0}) {
+                const QImage pixels = render(icons::outlined::ShapeThoughtBubble(
+                                                 adqt::icons::IconColors::primary(color)),
+                                             QSize(size, size), dpr)
+                                          .toImage();
+                require(!alphaBounds(pixels).isEmpty(),
+                        "thought bubble remains legible at menu sizes");
+                for (int y = 0; y < pixels.height(); ++y) {
+                    for (int x = 0; x < pixels.width(); ++x) {
+                        const QColor pixel = pixels.pixelColor(x, y);
+                        if (pixel.alpha() > 128)
+                            require(qAbs(pixel.red() - color.red()) <= 2 &&
+                                        qAbs(pixel.green() - color.green()) <= 2 &&
+                                        qAbs(pixel.blue() - color.blue()) <= 2,
+                                    "thought bubble inherits menu foreground color at every DPI");
+                    }
+                }
+            }
+            painter.drawPixmap(
+                12 + column * 108, row * 64 + (64 - size) / 2,
+                render(icons::outlined::ShapeDiamond(adqt::icons::IconColors::primary(color)),
+                       QSize(size, size)));
+            painter.drawPixmap(
+                48 + column++ * 108, row * 64 + (64 - size) / 2,
+                render(icons::outlined::ShapeThoughtBubble(adqt::icons::IconColors::primary(color)),
+                       QSize(size, size)));
+        }
+    }
+    painter.end();
+    adqt::icons::IconRenderRequest disabled;
+    disabled.logicalSize = QSize(20, 20);
+    disabled.mode = QIcon::Disabled;
+    adqt::icons::IconStatePalette palette;
+    palette.set(QIcon::Disabled, QIcon::Off, adqt::icons::IconColors::primary(colors.last()));
+    require(containsOpaqueColor(adqt::icons::renderIconPixmap(ref, disabled, palette).toImage(),
+                                colors.last()),
+            "thought bubble supports the menu's disabled palette");
+    if (const auto path = qEnvironmentVariable("SNOW_THOUGHT_BUBBLE_ICON_PREVIEW"); !path.isEmpty())
+        require(preview.save(path), "save thought bubble icon visual inspection sheet");
+}
+
 void revealIconFollowsAntDesign() {
     namespace icons = snow_shot::presentation::icons::custom;
     const auto ref = icons::outlined::RevealInFolder();
@@ -932,11 +1064,55 @@ void borderFillIconMatchesToolbarGeometry() {
         require(preview.save(path), "save Border icon inspection sheet");
 }
 
+void distanceUnitIconsFollowThemeAtToolbarSizes() {
+    namespace icons = snow_shot::presentation::icons::custom::outlined;
+    const QList<adqt::icons::IconRef> refs{icons::DistanceUnitPx(), icons::DistanceUnitPt(),
+                                           icons::DistanceUnitIn(), icons::DistanceUnitFt(),
+                                           icons::DistanceUnitUm()};
+    QImage preview(400, 160, QImage::Format_ARGB32_Premultiplied);
+    preview.fill(Qt::white);
+    QPainter painter(&preview);
+    for (int row = 0; row < 2; ++row) {
+        const QColor foreground = row ? QColor("#f0f0f0") : QColor("#262626");
+        painter.fillRect(QRect(0, row * 80, 400, 80), row ? QColor("#141414") : QColor("#ffffff"));
+        for (int index = 0; index < refs.size(); ++index) {
+            const auto ref = refs[index].withColors(adqt::icons::IconColors::primary(foreground));
+            require(adqt::icons::describeIcon(ref).colorModel ==
+                        adqt::icons::IconColorModel::Monochrome,
+                    "distance unit icons use theme colors");
+            for (int size : {16, 20, 32}) {
+                const auto pixmap = render(ref, QSize(size, size));
+                require(!alphaBounds(pixmap.toImage()).isEmpty() &&
+                            containsOpaqueColor(pixmap.toImage(), foreground),
+                        "each unit icon renders clearly in light and dark themes");
+                painter.drawPixmap(index * 80 + (size == 32 ? 40 : 8),
+                                   row * 80 + (size == 20 ? 44 : 12), pixmap);
+            }
+        }
+    }
+    painter.end();
+    if (const auto path = qEnvironmentVariable("SNOW_DISTANCE_UNIT_ICON_PREVIEW"); !path.isEmpty())
+        require(preview.save(path), "save distance unit icon preview");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
     try {
+        if (application.arguments().contains(QStringLiteral("--distance-units-only"))) {
+            distanceUnitIconsFollowThemeAtToolbarSizes();
+            return 0;
+        }
+        if (application.arguments().contains(QStringLiteral("--airdrop-only"))) {
+            airDropIconFollowsAntDesign();
+            return 0;
+        }
+        if (application.arguments().contains(QStringLiteral("--thought-bubble-only"))) {
+            thoughtBubbleIconFollowsAntDesign();
+            return 0;
+        }
+        thoughtBubbleIconFollowsAntDesign();
         spreadsheetIconFollowsAntDesign();
         if (application.arguments().contains(QStringLiteral("--spreadsheet-only")))
             return 0;
@@ -988,6 +1164,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         everySnowShotEntryRenders();
+        distanceUnitIconsFollowThemeAtToolbarSizes();
         arrowheadIconsFaceTheirRespectiveEndpoints();
         indentedTriangleCornersAreSymmetric();
         conversionIconsUseTheSuppliedProjectAssets();

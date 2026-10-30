@@ -20,6 +20,7 @@ pub enum LinearElementKind {
     PenHighlight,
     Distance,
     Angle,
+    Bracket,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -103,6 +104,13 @@ pub struct ArrowData {
     pub fill: ColorRgba8,
     pub fill_style: FillStyle,
     pub opacity: f64,
+    #[serde(default = "snow_draw_engine_core::arrow::default_arrow_outline_color")]
+    pub arrow_outline_color: ColorRgba8,
+    #[serde(
+        default,
+        deserialize_with = "snow_draw_engine_core::arrow::deserialize_arrow_outline_width"
+    )]
+    pub arrow_outline_width: f64,
 }
 
 impl ArrowData {
@@ -126,6 +134,8 @@ impl ArrowData {
             DEFAULT_ARROW_MAX_COORDINATE,
         );
         Some(Self {
+            arrow_outline_color: snow_draw_engine_core::arrow::default_arrow_outline_color(),
+            arrow_outline_width: 0.0,
             stroke_rendering_seed: 0,
             stroke_rendering_style: Default::default(),
             linear_kind: LinearElementKind::Arrow,
@@ -199,6 +209,9 @@ impl ArrowData {
         self.text_path_fraction = source.text_path_fraction;
         self.arrow_shaft_type = source.arrow_shaft_type;
         self.arrow_ratio = snow_draw_engine_core::arrow::normalize_arrow_ratio(source.arrow_ratio);
+        self.arrow_outline_color = source.arrow_outline_color;
+        self.arrow_outline_width =
+            snow_draw_engine_core::arrow::normalize_arrow_outline_width(source.arrow_outline_width);
         self.fill = source.fill;
         self.fill_style = source.fill_style;
         self.opacity = source.opacity;
@@ -220,11 +233,16 @@ impl ArrowData {
             LinearElementKind::PenHighlight => ElementKind::PenHighlight,
             LinearElementKind::Distance => ElementKind::Distance,
             LinearElementKind::Angle => ElementKind::Angle,
+            LinearElementKind::Bracket => ElementKind::Bracket,
         }
     }
 
     pub fn is_distance(&self) -> bool {
         self.linear_kind == LinearElementKind::Distance
+    }
+
+    pub fn is_bracket(&self) -> bool {
+        self.linear_kind == LinearElementKind::Bracket
     }
 
     pub fn is_angle(&self) -> bool {
@@ -233,6 +251,11 @@ impl ArrowData {
 
     pub fn is_generated_annotation(&self) -> bool {
         self.is_distance() || self.is_angle()
+    }
+
+    /// Linear annotations share selection appearance, including brackets without labels.
+    pub fn is_linear_annotation(&self) -> bool {
+        self.is_generated_annotation() || self.is_bracket()
     }
 
     pub fn is_regular_arrow(&self) -> bool {
@@ -309,6 +332,9 @@ impl ArrowData {
     }
 
     pub fn path_commands(&self) -> Vec<ArrowPathCommand> {
+        if self.is_bracket() {
+            return crate::bracket_path_commands(self);
+        }
         if self.is_angle() {
             return crate::angle::angle_path_commands(self);
         }
@@ -338,6 +364,8 @@ impl ArrowData {
     pub(crate) fn apply_patch(&self, patch: &ArrowPatch) -> Self {
         let points = patch.points.clone().unwrap_or_else(|| self.points.clone());
         Self {
+            arrow_outline_color: self.arrow_outline_color,
+            arrow_outline_width: self.arrow_outline_width,
             stroke_rendering_seed: self.stroke_rendering_seed,
             stroke_rendering_style: self.stroke_rendering_style,
             linear_kind: self.linear_kind,
@@ -442,6 +470,9 @@ fn arrow_global_points(arrow: &ArrowData) -> Vec<Point<f64>> {
 }
 
 pub fn arrow_is_degenerate(arrow: &ArrowData) -> bool {
+    if arrow.is_bracket() {
+        return crate::bracket_segments(arrow).is_none();
+    }
     if arrow.is_angle() {
         return crate::angle_geometry(arrow).is_none();
     }
@@ -613,6 +644,9 @@ pub fn arrow_text_max_width(arrow: &ArrowData, font_size: f64) -> f64 {
 }
 
 pub fn arrow_segment_midpoints(arrow: &ArrowData) -> Vec<(usize, Point<f64>)> {
+    if arrow.is_bracket() {
+        return Vec::new();
+    }
     if arrow.is_angle() {
         return Vec::new();
     }
@@ -650,6 +684,29 @@ pub fn arrow_segment_midpoints(arrow: &ArrowData) -> Vec<(usize, Point<f64>)> {
 }
 
 pub fn validate_arrow(arrow: &ArrowData) -> Result<(), ErrorCode> {
+    if arrow.is_bracket()
+        && (crate::bracket_segments(arrow).is_none()
+            || arrow.arrow_type != ArrowType::Straight
+            || arrow.start_arrowhead.is_some()
+            || arrow.end_arrowhead.is_some()
+            || arrow.start_binding.is_some()
+            || arrow.end_binding.is_some()
+            || arrow.distance.is_some()
+            || arrow.angle.is_some()
+            || arrow.text_element_id.is_some()
+            || arrow.text_path_fraction.is_some()
+            || arrow.fixed_segments.is_some()
+            || arrow.start_is_special.is_some()
+            || arrow.end_is_special.is_some()
+            || arrow.arrow_shaft_type != snow_draw_engine_core::arrow::ArrowShaftType::Plain
+            || arrow.stroke_style != StrokeStyle::Solid
+            || arrow.fill.a != 0
+            || arrow.fill_style != FillStyle::Solid
+            || !arrow.stroke_width.is_finite()
+            || !(1.0..=72.0).contains(&arrow.stroke_width))
+    {
+        return Err(ErrorCode::InvalidArgument);
+    }
     if arrow.is_angle() {
         crate::validate_angle_annotation(arrow.angle.ok_or(ErrorCode::InvalidArgument)?)?;
         if arrow.points.len() != 3
@@ -691,6 +748,10 @@ pub fn validate_arrow(arrow: &ArrowData) -> Result<(), ErrorCode> {
             return Err(ErrorCode::InvalidArgument);
         }
     } else if arrow.distance.is_some() {
+        return Err(ErrorCode::InvalidArgument);
+    }
+    if !arrow.arrow_outline_width.is_finite() || !(0.0..=72.0).contains(&arrow.arrow_outline_width)
+    {
         return Err(ErrorCode::InvalidArgument);
     }
     let scalar_fields = [
@@ -736,7 +797,7 @@ pub fn validate_arrow(arrow: &ArrowData) -> Result<(), ErrorCode> {
 /// Ink overflow is independent of the centerline used for binding and editing.
 pub fn arrow_paint_bounds(arrow: &ArrowData) -> DrawRect {
     let bounds = arrow_bounds(arrow);
-    let outset = arrow_stroke_rendering_outset(arrow);
+    let outset = arrow_stroke_rendering_outset(arrow) + arrow_outline_outset(arrow);
     DrawRect::new(
         bounds.min_x - outset,
         bounds.min_y - outset,
@@ -745,9 +806,17 @@ pub fn arrow_paint_bounds(arrow: &ArrowData) -> DrawRect {
     )
 }
 
+pub fn arrow_outline_outset(arrow: &ArrowData) -> f64 {
+    if arrow.is_regular_arrow() && arrow.arrow_outline_color.a != 0 && arrow.stroke_width > 0.0 {
+        snow_draw_engine_core::arrow::normalize_arrow_outline_width(arrow.arrow_outline_width) / 2.0
+    } else {
+        0.0
+    }
+}
+
 fn arrow_stroke_rendering_outset(arrow: &ArrowData) -> f64 {
     if !(arrow.is_regular_arrow() || arrow.is_line())
-        || arrow.stroke.a == 0
+        || (arrow.stroke.a == 0 && arrow_outline_outset(arrow) == 0.0)
         || arrow.stroke_width <= 0.0
     {
         return 0.0;
@@ -756,6 +825,9 @@ fn arrow_stroke_rendering_outset(arrow: &ArrowData) -> f64 {
 }
 
 pub fn arrow_bounds(arrow: &ArrowData) -> DrawRect {
+    if arrow.is_bracket() {
+        return crate::bracket_bounds(arrow);
+    }
     let mut global_points = arrow_visual_points(arrow);
     if let Some(shaft) = crate::tapered_arrow_geometry(arrow) {
         global_points.extend(
@@ -790,7 +862,11 @@ pub fn arrow_bounds(arrow: &ArrowData) -> DrawRect {
 }
 
 pub fn arrow_hit_test(arrow: &ArrowData, point: Point<f64>, hit_tolerance: f64) -> bool {
-    let hit_tolerance = hit_tolerance.max(0.0) + arrow_stroke_rendering_outset(arrow);
+    if arrow.is_bracket() {
+        return crate::bracket_hit_test(arrow, point, hit_tolerance);
+    }
+    let hit_tolerance =
+        hit_tolerance.max(0.0) + arrow_stroke_rendering_outset(arrow) + arrow_outline_outset(arrow);
     if arrow_is_degenerate(arrow) {
         return false;
     }
@@ -805,7 +881,7 @@ pub fn arrow_hit_test(arrow: &ArrowData, point: Point<f64>, hit_tolerance: f64) 
         return true;
     }
 
-    if arrow.stroke.a == 0 || arrow.stroke_width <= 0.0 {
+    if (arrow.stroke.a == 0 && arrow_outline_outset(arrow) == 0.0) || arrow.stroke_width <= 0.0 {
         return false;
     }
 
@@ -1186,6 +1262,16 @@ fn curve_path_commands(
 }
 
 fn arrow_visual_points(arrow: &ArrowData) -> Vec<Point<f64>> {
+    if let Some(segments) = crate::bracket_segments(arrow) {
+        let mut points = Vec::with_capacity(65);
+        points.push(segments[0][0]);
+        for [a, b, c, d] in segments {
+            for step in 1..=16 {
+                points.push(point_at_bezier(a, b, c, d, f64::from(step) / 16.0));
+            }
+        }
+        return points;
+    }
     if !arrow.is_curve() {
         return arrow_global_points(arrow);
     }
@@ -1374,6 +1460,53 @@ fn point_in_polygon(points: &[Point<f64>], point: Point<f64>) -> bool {
 
 #[cfg(test)]
 mod line_tests {
+
+    #[test]
+    fn arrow_outline_round_trip_bounds_and_hit_testing() {
+        let mut arrow = ArrowData::from_global_points(
+            &[Point::new(0.0, 0.0), Point::new(100.0, 0.0)],
+            ColorRgba8 {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            2.0,
+            StrokeStyle::Solid,
+            ArrowType::Straight,
+            None,
+            None,
+        )
+        .unwrap();
+        let original_bounds = arrow_paint_bounds(&arrow);
+        assert!(!arrow_hit_test(&arrow, Point::new(50.0, 4.0), 0.0));
+        arrow.arrow_outline_width = 8.0;
+        arrow.stroke.a = 0;
+        assert!(arrow_hit_test(&arrow, Point::new(50.0, 4.0), 0.0));
+        assert_eq!(
+            arrow_paint_bounds(&arrow).max_y,
+            original_bounds.max_y + 4.0
+        );
+        let mut json = serde_json::to_value(&arrow).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ArrowData>(json.clone()).unwrap(),
+            arrow
+        );
+        json.as_object_mut().unwrap().remove("arrow_outline_width");
+        json.as_object_mut().unwrap().remove("arrow_outline_color");
+        let legacy: ArrowData = serde_json::from_value(json).unwrap();
+        assert_eq!(legacy.arrow_outline_width, 0.0);
+        assert_eq!(
+            legacy.arrow_outline_color,
+            snow_draw_engine_core::arrow::default_arrow_outline_color()
+        );
+        arrow.arrow_outline_color.a = 0;
+        assert!(!arrow_hit_test(&arrow, Point::new(50.0, 4.0), 0.0));
+        assert_eq!(arrow_paint_bounds(&arrow), original_bounds);
+        arrow.arrow_outline_color.a = 255;
+        let line = arrow.into_line(ColorRgba8::default(), FillStyle::Solid);
+        assert_eq!(arrow_outline_outset(&line), 0.0);
+    }
 
     #[test]
     fn border_fill_keeps_closed_line_interiors_unhittable() {

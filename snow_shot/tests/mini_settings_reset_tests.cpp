@@ -153,9 +153,18 @@ void shortcutAndMouseResets(settings::BuiltInSettingsBackend& backend) {
     require(configuration.setValue(QStringLiteral("global_shortcuts/global_canvas"),
                                    QJsonArray{QStringLiteral("Ctrl+Alt+F10")}),
             "customize retained other shortcut before resetting");
+#ifdef Q_OS_WIN
+    const QString topmostKey =
+        QStringLiteral("global_shortcuts/toggle_window_under_cursor_always_on_top");
+    require(configuration.setValue(topmostKey, QJsonArray{QStringLiteral("Ctrl+Alt+F11")}),
+            "customize Mini window-under-cursor topmost before resetting");
+#endif
     require(backend.resetSection(settings::SettingsSectionReset::OtherShortcuts),
             "Mini other shortcut reset must skip unavailable selected-text translation");
     requireDefault(QStringLiteral("global_shortcuts/global_canvas"));
+#ifdef Q_OS_WIN
+    requireDefault(topmostKey);
+#endif
 
     require(backend.applyGlobalMouseCombination(
                 settings::SettingsGlobalMouseAction::ScreenshotCopy,
@@ -264,6 +273,17 @@ void screenshotBehaviorReset(settings::BuiltInSettingsBackend& backend) {
 }
 
 void recognitionOptInResets(settings::BuiltInSettingsBackend& backend) {
+    constexpr auto resident = settings::SettingsSwitchBinding::OcrResidentProcess;
+    require(!storage::ConfigurationSchema::defaultValue(
+                 QStringLiteral("text_recognition/resident_process"))
+                    .toBool() &&
+                backend.switchEnabled(resident) && !backend.switchValue(resident),
+            "Mini resident OCR must be available but default off");
+    require(backend.applySwitchValue(resident, true) && backend.switchValue(resident),
+            "Mini resident OCR can be explicitly enabled");
+    require(backend.resetSection(settings::SettingsSectionReset::TextRecognition) &&
+                !backend.switchValue(resident),
+            "Mini recognition reset must restore resident OCR off");
     namespace layout = presentation::toolbar_layout;
     for (const auto kind : {storage::ScreenshotToolbarLayoutKind::ActionTools,
                             storage::ScreenshotToolbarLayoutKind::PinnedActionTools}) {

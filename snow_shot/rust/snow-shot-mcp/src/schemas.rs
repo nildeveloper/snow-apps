@@ -89,6 +89,7 @@ struct Selection {
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum CanvasTool {
+    Bracket,
     SpeechBubble,
     Magnifier,
     Distance,
@@ -297,6 +298,12 @@ enum Annotation {
         #[serde(default)]
         style: DistanceAnnotationStyle,
     },
+    Bracket {
+        /// Upper endpoint, apex, and lower endpoint. The endpoint guide is not exported.
+        points: [[f64; 2]; 3],
+        #[serde(default)]
+        style: BracketAnnotationStyle,
+    },
     Angle {
         /// First endpoint, vertex, and a point defining the second side direction.
         /// Both sides use the first side length; the third point distance is ignored.
@@ -387,6 +394,8 @@ struct Style {
     stroke_style: Option<StrokeStyle>,
     stroke_rendering_style: Option<StrokeRenderingStyle>,
     arrow_type: Option<ArrowType>,
+    arrow_outline_color: Option<[u8; 4]>,
+    arrow_outline_width: Option<ArrowOutlineWidth>,
     filter: Option<Filter>,
 }
 #[derive(Default, Deserialize, JsonSchema)]
@@ -753,10 +762,12 @@ bounded_style_number!(DistanceFactor, f64, "number", 0.01, 1000.0);
 bounded_style_number!(DistanceDecimals, u8, "integer", 0, 3);
 bounded_style_number!(DistanceStrokeWidth, f64, "number", 1.0, 72.0);
 bounded_style_number!(AngleDecimals, u8, "integer", 0, 3);
+bounded_style_number!(BracketStrokeWidth, f64, "number", 1.0, 72.0);
 bounded_style_number!(AngleStrokeWidth, f64, "number", 1.0, 72.0);
 bounded_style_number!(MagnifierFactor, f64, "number", 1.0, 10.0);
 bounded_style_number!(MagnifierStrokeWidth, f64, "number", 0.0, 72.0);
 bounded_style_number!(ArrowRatio, f64, "number", 0.5, 3.0);
+bounded_style_number!(ArrowOutlineWidth, f64, "number", 0.0, 72.0);
 bounded_style_number!(CornerRadius, f64, "number", 0.0, 8192.0);
 bounded_style_number!(SerialNumber, u64, "integer", 0_u64, 9007199254740991_u64);
 bounded_style_number!(BrushEraserWidth, f64, "number", 1.0, 72.0);
@@ -766,6 +777,15 @@ enum ShapeVariant {
     Rectangle,
     Ellipse,
     Diamond,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum AnnotationShapeVariant {
+    Rectangle,
+    Ellipse,
+    Diamond,
+    /// Only supported by the speech_bubble style target.
+    ThoughtBubble,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -783,6 +803,10 @@ enum DistanceUnit {
     M,
     Km,
     Mm,
+    Pt,
+    In,
+    Ft,
+    Um,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -809,6 +833,13 @@ enum AngleUnit {
 enum AngleType {
     Directed,
     Interior,
+}
+
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+struct BracketAnnotationStyle {
+    stroke: Option<[u8; 4]>,
+    stroke_width: Option<BracketStrokeWidth>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -882,6 +913,7 @@ enum ToolStyle {
     Standard(Box<StandardToolStyle>),
     BrushEraser(BrushEraserToolStyle),
     Angle(AngleToolStyle),
+    Bracket(BracketToolStyle),
 }
 // Serde cannot consume a flattened untagged enum under deny_unknown_fields.
 // Keep the union outside each complete mutation so its strict object branch
@@ -894,6 +926,18 @@ enum ScreenshotToolStyleMutation {
     Standard(Box<Mutation<StandardToolStyle>>),
     BrushEraser(Mutation<BrushEraserToolStyle>),
     Angle(Mutation<AngleToolStyle>),
+    Bracket(Mutation<BracketToolStyle>),
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum BracketTarget {
+    Bracket,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BracketToolStyle {
+    target: BracketTarget,
+    style: BracketAnnotationStyle,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -944,6 +988,10 @@ struct BrushEraserStylePatch {
 #[serde(deny_unknown_fields)]
 struct StylePatch {
     #[serde(default)]
+    arrow_outline_color: Option<[u8; 4]>,
+    #[serde(default)]
+    arrow_outline_width: Option<ArrowOutlineWidth>,
+    #[serde(default)]
     factor: Option<DistanceFactor>,
     #[serde(default)]
     unit: Option<DistanceUnit>,
@@ -986,7 +1034,7 @@ struct StylePatch {
     #[serde(default)]
     corner_radius: Option<f64>,
     #[serde(default)]
-    shape: Option<ShapeVariant>,
+    shape: Option<AnnotationShapeVariant>,
     #[serde(default)]
     fill_style: Option<FillStyle>,
     #[serde(default)]
@@ -1391,7 +1439,7 @@ mod tests {
     }
     #[test]
     fn distance_annotation_schemas_validate_settings_and_two_endpoints() {
-        for unit in ["px", "cm", "m", "km", "mm"] {
+        for unit in ["px", "cm", "m", "km", "mm", "pt", "in", "ft", "um"] {
             let style = json!({"stroke":[245,34,45,255],"stroke_width":2,"factor":0.01,
                 "unit":unit,"decimal_places":3,"endpoint_scale":0.5,"endpoint_style":"bar"});
             assert!(
@@ -1508,6 +1556,18 @@ mod tests {
                     "fill_style": "solid", "corner_radius": 6}});
             input[owner] = json!("fixture");
             assert!(schema(method, Some(input.clone())).is_ok());
+            input["style"]["shape"] = json!("thought_bubble");
+            assert!(schema(method, Some(input.clone())).is_ok());
+            for style in ["architect", "artist", "cartoonist"] {
+                input["style"]["stroke_rendering_style"] = json!(style);
+                assert!(schema(method, Some(input.clone())).is_ok());
+            }
+            input["style"]["stroke_rendering_style"] = json!("rough");
+            assert!(schema(method, Some(input.clone())).is_err());
+            input["style"]
+                .as_object_mut()
+                .unwrap()
+                .remove("stroke_rendering_style");
             input["style"]["shape"] = json!("triangle");
             assert!(schema(method, Some(input)).is_err());
         }
@@ -1619,6 +1679,50 @@ mod tests {
                 })),
             );
             assert_eq!(result.is_ok(), angle_type != "unknown");
+        }
+    }
+
+    #[test]
+    fn bracket_schemas_match_the_three_point_and_two_property_contract() {
+        for (name, owner) in [
+            ("snow_shot_screenshot_set_tool", "session_id"),
+            ("snow_shot_document_set_tool", "document_id"),
+        ] {
+            assert!(
+                schema(
+                    name,
+                    Some(json!({owner:"owned","expected_revision":1,"tool":"bracket"}))
+                )
+                .is_ok()
+            );
+        }
+        for (name, owner) in [
+            ("snow_shot_screenshot_set_tool_style", "session_id"),
+            ("snow_shot_document_set_tool_style", "document_id"),
+        ] {
+            for width in [1., 2.5, 72.] {
+                assert!(schema(name,Some(json!({owner:"owned","expected_revision":1,"target":"bracket","style":{"stroke_width":width,"stroke":[10,20,30,128]}}))).is_ok());
+            }
+            for style in [
+                json!({"stroke_width":0}),
+                json!({"stroke_width":73}),
+                json!({"unit":"degrees"}),
+                json!({"fill":[0,0,0,255]}),
+            ] {
+                assert!(schema(name,Some(json!({owner:"owned","expected_revision":1,"target":"bracket","style":style}))).is_err());
+            }
+        }
+        for (name, owner) in [
+            ("snow_shot_screenshot_apply_annotations", "session_id"),
+            ("snow_shot_document_apply_annotations", "document_id"),
+        ] {
+            for points in [
+                json!([[0, 0], [80, 100], [0, 200]]),
+                json!([[0, 0], [80, 100]]),
+            ] {
+                let valid = points.as_array().unwrap().len() == 3;
+                assert_eq!(schema(name,Some(json!({owner:"owned","expected_revision":1,"operations":[{"type":"bracket","points":points}]}))).is_ok(),valid);
+            }
         }
     }
 
@@ -1845,9 +1949,108 @@ mod tests {
     }
 
     #[test]
+    fn arrow_outline_styles_are_typed_and_bounded() {
+        for width in [
+            json!(0),
+            json!(8),
+            json!(72),
+            json!(-1),
+            json!(73),
+            json!("4"),
+        ] {
+            let valid = width.as_f64().is_some_and(|v| (0.0..=72.0).contains(&v));
+            for (tool, owner) in [
+                ("snow_shot_screenshot_set_tool_style", "session_id"),
+                ("snow_shot_document_set_tool_style", "document_id"),
+            ] {
+                assert_eq!(
+                    schema(
+                        tool,
+                        Some(json!({
+                            owner:"owned", "expected_revision":1, "target":"arrow",
+                            "style":{"arrow_outline_width":width,
+                                     "arrow_outline_color":[12,120,240,128]}
+                        }))
+                    )
+                    .is_ok(),
+                    valid
+                );
+            }
+            assert_eq!(
+                schema(
+                    "snow_shot_screenshot_apply_annotations",
+                    Some(json!({
+                        "session_id":"s", "expected_revision":1, "operations":[{
+                            "type":"arrow", "points":[[0,0],[100,80]],
+                            "style":{"arrow_outline_width":width,
+                                     "arrow_outline_color":[12,120,240,128]}
+                        }]
+                    }))
+                )
+                .is_ok(),
+                valid
+            );
+        }
+    }
+
+    #[test]
+    fn arrow_outline_colors_use_rgba_bytes() {
+        for (color, valid) in [
+            (json!([255, 204, 0, 128]), true),
+            (json!([0, 0, 0, 0]), true),
+            (json!([255, 255, 255, 255]), true),
+            (json!("#80ffcc00"), false),
+            (json!([255, 204, 0]), false),
+            (json!([255, 204, 0, 128, 255]), false),
+            (json!([-1, 204, 0, 128]), false),
+            (json!([256, 204, 0, 128]), false),
+            (json!([255, 204, 0, 128.5]), false),
+            (json!([255, 204, 0, "128"]), false),
+        ] {
+            for (tool, owner) in [
+                ("snow_shot_screenshot_set_tool_style", "session_id"),
+                ("snow_shot_document_set_tool_style", "document_id"),
+            ] {
+                assert_eq!(
+                    schema(
+                        tool,
+                        Some(json!({
+                            owner:"owned", "expected_revision":1, "target":"arrow",
+                            "style":{"arrow_outline_color":color}
+                        }))
+                    )
+                    .is_ok(),
+                    valid,
+                    "{tool}: {color}"
+                );
+            }
+            assert_eq!(
+                schema(
+                    "snow_shot_screenshot_apply_annotations",
+                    Some(json!({
+                        "session_id":"s", "expected_revision":1, "operations":[{
+                            "type":"arrow", "points":[[0,0],[100,80]],
+                            "style":{"arrow_outline_color":color}
+                        }]
+                    }))
+                )
+                .is_ok(),
+                valid,
+                "annotation: {color}"
+            );
+        }
+    }
+
+    #[test]
     fn stroke_rendering_styles_are_typed() {
         for value in ["architect", "artist", "cartoonist"] {
-            for target in ["rectangle", "arrow", "line", "serial_number"] {
+            for target in [
+                "rectangle",
+                "speech_bubble",
+                "arrow",
+                "line",
+                "serial_number",
+            ] {
                 assert!(
                     schema(
                         "snow_shot_screenshot_set_tool_style",

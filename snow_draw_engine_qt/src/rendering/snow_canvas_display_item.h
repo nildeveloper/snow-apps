@@ -36,6 +36,12 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
         double failedPhysicalScale = 0.0;
         double exteriorGuard = 0.0;
     };
+    struct PathGeometryDiagnostics {
+        std::uint64_t builds = 0;
+        std::uint64_t reuses = 0;
+        std::uint64_t reads = 0;
+    };
+    static PathGeometryDiagnostics takePathGeometryDiagnostics();
     SnowCanvasSceneItem();
     ~SnowCanvasSceneItem();
     explicit SnowCanvasSceneItem(const SnowSceneDisplayItem& item);
@@ -88,6 +94,8 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
         QRectF canvasBounds;
         double cumulativeStartLength = 0.0;
         QPainterPath canvasPath;
+        bool startsSubpath = false;
+        std::uint32_t subpathCount = 0;
         std::vector<std::int64_t> spatialCells;
     };
     const std::vector<PathChunk>& pathChunks() const;

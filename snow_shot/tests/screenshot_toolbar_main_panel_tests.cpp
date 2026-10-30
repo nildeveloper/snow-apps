@@ -23,9 +23,11 @@
 #include "antd_icons.h"
 
 #include <QApplication>
+#include <QTranslator>
 #include <QCoreApplication>
 #include <QDir>
 #include <QEvent>
+#include <QEnterEvent>
 #include <QFont>
 #include <QFrame>
 #include <QElapsedTimer>
@@ -511,12 +513,18 @@ void toolbarRowsShareShadowMetrics() {
             qobject_cast<QGraphicsDropShadowEffect*>(toolbar.mainPanel()->graphicsEffect());
         auto* style =
             qobject_cast<QGraphicsDropShadowEffect*>(toolbar.stylePanel()->graphicsEffect());
+#ifdef Q_OS_MACOS
+        require(main == nullptr && style == nullptr &&
+                    ScreenshotToolbarMainPanel::shadowMargins().isNull(),
+                "macOS toolbar rows use native window shadows without Qt effects or padding");
+#else
         require(main != nullptr && style != nullptr && main->blurRadius() == style->blurRadius() &&
                     main->offset() == style->offset() && main->color() == style->color(),
                 "main and secondary rows must use identical shadow metrics at every scale");
         require(qFuzzyCompare(main->blurRadius(), 18.0 * scale) &&
                     main->offset() == QPointF(0.0, 3.0 * scale),
                 "shared toolbar shadows must retain fractional DPI precision");
+#endif
     }
 }
 
@@ -733,10 +741,15 @@ void recordingToolbarUsesTheScreenshotMainPanelContract() {
 
     const auto* shadow =
         qobject_cast<QGraphicsDropShadowEffect*>(recordingToolbar.mainPanel()->graphicsEffect());
+#ifdef Q_OS_MACOS
+    require(shadow == nullptr && margins.isNull(),
+            "macOS recording toolbar retains the shared native-shadow contract");
+#else
     require(shadow != nullptr, "recording shadow should use the reference drop-shadow effect");
     require(qFuzzyCompare(shadow->blurRadius() + 1.0, 19.0) &&
                 shadow->offset() == QPointF(0.0, 3.0) && shadow->color() == QColor(0, 0, 0, 90),
             "recording shadow should preserve the reference visual parameters");
+#endif
 }
 
 void recordingAudioIconsFollowSettings() {
@@ -1213,6 +1226,11 @@ void screenshotToolbarRendersShadowOutsideItsPanel() {
     painter.end();
 
     const QRect panel = toolbar.mainPanel()->geometry();
+#ifdef Q_OS_MACOS
+    require(panel == image.rect() && toolbar.mainPanel()->graphicsEffect() == nullptr &&
+                image.pixelColor(panel.center()).alpha() == 255,
+            "macOS toolbar renders its surface without reserving pixels for a Qt shadow");
+#else
     const QPoint topSample(panel.center().x(), panel.top() - 1);
     const QPoint bottomSample(panel.center().x(), panel.bottom() + 1);
     const QPoint leftSample(panel.left() - 1, panel.center().y());
@@ -1226,6 +1244,7 @@ void screenshotToolbarRendersShadowOutsideItsPanel() {
                 image.pixelColor(leftSample).alpha() < 255 &&
                 image.pixelColor(rightSample).alpha() < 255,
             "screenshot toolbar shadow should remain translucent outside the panel");
+#endif
 }
 
 void filterValuesDoNotRelayoutTheStableControlSet() {
@@ -1806,6 +1825,142 @@ void toolbarSkinProfilesAndLifecycle() {
 } // namespace
 
 namespace {
+void airDropToolbarRoutingAndLayoutMigration() {
+    namespace layout = snow_shot::presentation::toolbar_layout;
+    using Kind = snow_shot::storage::ScreenshotToolbarLayoutKind;
+    using Layout = snow_shot::storage::ScreenshotToolbarLayout;
+#ifdef Q_OS_MACOS
+    constexpr bool supported = true;
+#else
+    constexpr bool supported = false;
+#endif
+    const QString air = QStringLiteral("airdrop"), print = QStringLiteral("print"),
+                  save = QStringLiteral("save-as-file"), quick = QStringLiteral("quick-save"),
+                  cloud = QStringLiteral("upload-to-cloud");
+    const QStringList stored = supported ? QStringList{cloud, air, print, quick, save}
+                                         : QStringList{cloud, print, quick, save};
+    for (const auto kind : {Kind::ActionTools, Kind::PinnedActionTools}) {
+        require(layout::defaultPositions(kind).contains(stored),
+                "default save stack has AirDrop after Print");
+        Layout legacy{{{cloud, print, quick, save}}, {}};
+        const auto upgraded = layout::normalizedLayout(legacy, kind);
+        require(upgraded.positions.first() == stored &&
+                    layout::normalizedLayout(upgraded, kind) == upgraded,
+                "legacy AirDrop migration is ordered and idempotent");
+        const auto popup = layout::stackPresentation(stored, [](const QString&) { return true; });
+        require(popup.entryItemId() == save &&
+                    (!supported ||
+                     popup.popoverItemIds.indexOf(air) == popup.popoverItemIds.indexOf(print) + 1),
+                "visible AirDrop immediately follows Print without changing the default trigger");
+        const auto verifyStorage = [kind](const Layout& input) {
+            QJsonArray positions;
+            for (const auto& position : input.positions)
+                positions.append(QJsonArray::fromStringList(position));
+            const auto result = snow_shot::storage::ConfigurationSchema::normalize(
+                kind == Kind::ActionTools ? QStringLiteral("screenshot_toolbar/action_tools_layout")
+                                          : QStringLiteral("pin_to_screen/action_tools_layout"),
+                QJsonObject{{QStringLiteral("positions"), positions},
+                            {QStringLiteral("hidden"), QJsonArray::fromStringList(input.hidden)}});
+            const auto expected = layout::normalizedLayout(input, kind);
+            QJsonArray expectedPositions;
+            for (const auto& position : expected.positions)
+                expectedPositions.append(QJsonArray::fromStringList(position));
+            require(result.valid &&
+                        result.value.toObject().value(QStringLiteral("positions")) ==
+                            expectedPositions &&
+                        result.value.toObject().value(QStringLiteral("hidden")) ==
+                            QJsonArray::fromStringList(expected.hidden),
+                    "storage and presentation must normalize AirDrop identically");
+        };
+        for (const Layout& input :
+             {legacy, Layout{{{print}, {save}}, {}}, Layout{{{save}}, {print}}, Layout{{}, {save}},
+              Layout{{{air}, {save}}, {}}, Layout{{{save}}, {air}}})
+            verifyStorage(input);
+        if (supported) {
+            auto moved = layout::normalizedLayout(Layout{{{air}, {save}}, {}}, kind);
+            require(moved.positions.first() == QStringList{air},
+                    "preserve explicitly moved AirDrop");
+            auto hidden = layout::normalizedLayout(Layout{{{save}}, {air}}, kind);
+            require(hidden.hidden.contains(air) && !hidden.positions.first().contains(air),
+                    "preserve explicitly hidden AirDrop");
+            require(layout::normalizedLayout(Layout{{}, {save}}, kind).hidden.contains(air),
+                    "AirDrop inherits a hidden Save group");
+            auto movedPrint = layout::normalizedLayout(Layout{{{print}, {save}}, {}}, kind);
+            require(movedPrint.positions.first() == QStringList{print} &&
+                        movedPrint.positions[1] == QStringList{cloud, air, quick, save},
+                    "custom Print placement stays intact while AirDrop joins Save");
+        }
+        for (const bool enabled : {false, true}) {
+            auto options = screenshotOptions();
+            options.showSaveButton = true;
+            options.showAirDropButton = enabled;
+            options.saveButtonWithResultActions = kind == Kind::ActionTools;
+            options.actionToolsLayoutKind = kind;
+            options.actionToolsLayout = upgraded;
+            ScreenshotToolPalette palette(options);
+            prepare(palette);
+            int shares = 0, prints = 0;
+            QObject::connect(&palette, &ScreenshotToolPalette::airDropRequested, [&] { ++shares; });
+            QObject::connect(&palette, &ScreenshotToolPalette::printRequested, [&] { ++prints; });
+            auto* button = palette.findChild<adqt::widgets::AdButton*>(
+                QStringLiteral("screenshotAirDropButton"));
+            require(bool(button) == (enabled && supported),
+                    "AirDrop requires both macOS and an opted-in host");
+            if (!button)
+                continue;
+            button->click();
+            require(shares == 1 && prints == 0,
+                    "AirDrop source dispatches exactly one sharing request");
+            adqt::widgets::AdButton* trigger = nullptr;
+            for (auto* candidate : palette.findChildren<adqt::widgets::AdButton*>()) {
+                if (candidate->property("screenshotToolbarPositionItems")
+                        .toStringList()
+                        .contains(air)) {
+                    trigger = candidate;
+                    break;
+                }
+            }
+            require(trigger, "AirDrop belongs to the visible Save group");
+            auto* popover = trigger->findChild<adqt::widgets::AdPopover*>();
+            require(popover, "Save group has a popup");
+            popover->show();
+            flushEvents();
+            auto* content = popover->contentWidget();
+            auto* shareOption = content->findChild<adqt::widgets::AdButton*>(
+                QStringLiteral("screenshotActionToolGroupOption-airdrop"));
+            auto* printOption = content->findChild<adqt::widgets::AdButton*>(
+                QStringLiteral("screenshotActionToolGroupOption-print"));
+            require(shareOption && printOption &&
+                        content->layout()->indexOf(shareOption) ==
+                            content->layout()->indexOf(printOption) + 1,
+                    "rendered popup places AirDrop immediately right of Print");
+            class AirDropTranslator final : public QTranslator {
+              public:
+                bool isEmpty() const override {
+                    return false;
+                }
+                QString translate(const char* context, const char* source, const char*,
+                                  int) const override {
+                    if (qstrcmp(context, "ScreenshotToolPalette") == 0 &&
+                        qstrcmp(source, "AirDrop") == 0)
+                        return QStringLiteral("Translated AirDrop");
+                    return {};
+                }
+            } translator;
+            require(QApplication::installTranslator(&translator),
+                    "install AirDrop label translator");
+            flushEvents();
+            require(button->accessibleName() == QStringLiteral("Translated AirDrop") &&
+                        shareOption->accessibleName() == QStringLiteral("Translated AirDrop"),
+                    "AirDrop source and materialized popup retranslate on LanguageChange");
+            QApplication::removeTranslator(&translator);
+            flushEvents();
+            shareOption->click();
+            require(shares == 2 && prints == 0, "popup AirDrop dispatches once");
+        }
+    }
+}
+
 void printToolbarRoutingAndLayoutMigration() {
     namespace layout = snow_shot::presentation::toolbar_layout;
     using Kind = snow_shot::storage::ScreenshotToolbarLayoutKind;
@@ -1813,6 +1968,10 @@ void printToolbarRoutingAndLayoutMigration() {
     const QString upload = QStringLiteral("upload-to-cloud");
     const QString quick = QStringLiteral("quick-save");
     const QString save = QStringLiteral("save-as-file");
+    QStringList saveStack{upload, print, quick, save};
+#ifdef Q_OS_MACOS
+    saveStack.insert(1, QStringLiteral("airdrop"));
+#endif
     for (const auto kind : {Kind::ActionTools, Kind::PinnedActionTools}) {
         const auto verifyStorage = [kind](
                                        const snow_shot::storage::ScreenshotToolbarLayout& input) {
@@ -1838,13 +1997,12 @@ void printToolbarRoutingAndLayoutMigration() {
                     "storage and toolbar models must agree on Print layout migration");
         };
         auto defaults = layout::defaultPositions(kind);
-        require(defaults.contains(QStringList{upload, print, quick, save}),
-                "Print must join the default Save as File stack");
+        require(defaults.contains(saveStack), "Print must join the default Save as File stack");
         snow_shot::storage::ScreenshotToolbarLayout old;
         old.positions = {{save, QStringLiteral("text-recognition")}};
         const auto upgraded = layout::normalizedLayout(old, kind);
         require(upgraded.positions[0] ==
-                    QStringList{upload, print, quick, save, QStringLiteral("text-recognition")},
+                    (saveStack + QStringList{QStringLiteral("text-recognition")}),
                 "migration must preserve previous item order and placement");
         verifyStorage(old);
         require(layout::normalizedLayout(upgraded, kind) == upgraded,
@@ -1890,6 +2048,147 @@ void printToolbarRoutingAndLayoutMigration() {
         require(prints == 2 && saves == 0, "Print source button must route once");
     }
 }
+void liveWindowPinToolbarGroupAndLayoutMigration() {
+    namespace layout = snow_shot::presentation::toolbar_layout;
+    using Kind = snow_shot::storage::ScreenshotToolbarLayoutKind;
+    using Layout = snow_shot::storage::ScreenshotToolbarLayout;
+    const QString pin = QStringLiteral("pin-to-screen");
+    const QString live = QStringLiteral("pin-window-to-screen");
+    const bool supported = snow_shot::app::editionActionToolAvailable(live);
+    const QStringList group = supported ? QStringList{live, pin} : QStringList{pin};
+    require(layout::actionDefaultPositions().contains(group),
+            "live pin shares the default Pin to Screen position");
+    for (const Layout& input :
+         {Layout{{{pin}}, {}}, Layout{{{pin, QStringLiteral("save-as-file")}}, {}},
+          Layout{{{live}, {pin}}, {}}, Layout{{{pin}}, {live}}, Layout{{}, {pin}}}) {
+        const Layout normalized = layout::normalizedLayout(input, Kind::ActionTools);
+        QJsonArray positions;
+        for (const auto& position : input.positions)
+            positions.append(QJsonArray::fromStringList(position));
+        const auto stored = snow_shot::storage::ConfigurationSchema::normalize(
+            QStringLiteral("screenshot_toolbar/action_tools_layout"),
+            QJsonObject{{QStringLiteral("positions"), positions},
+                        {QStringLiteral("hidden"), QJsonArray::fromStringList(input.hidden)}});
+        QJsonArray expected;
+        for (const auto& position : normalized.positions)
+            expected.append(QJsonArray::fromStringList(position));
+        require(stored.valid &&
+                    stored.value.toObject().value(QStringLiteral("positions")) == expected &&
+                    stored.value.toObject().value(QStringLiteral("hidden")) ==
+                        QJsonArray::fromStringList(normalized.hidden) &&
+                    layout::normalizedLayout(normalized, Kind::ActionTools) == normalized,
+                "storage and presentation agree on idempotent live pin layout migration");
+    }
+    if (!supported)
+        return;
+    require(layout::normalizedLayout(Layout{{{pin}}, {}}, Kind::ActionTools).positions.first() ==
+                group,
+            "existing Pin placement gains live pin without changing its primary action");
+    require(layout::normalizedLayout(Layout{{{live}, {pin}}, {}}, Kind::ActionTools)
+                    .positions.first() == QStringList{live},
+            "explicit custom live pin placement is preserved");
+    require(layout::normalizedLayout(Layout{{}, {pin}}, Kind::ActionTools).hidden.contains(live),
+            "live pin inherits a hidden Pin group");
+    require(
+        layout::normalizedLayout(Layout{{{pin}}, {live}}, Kind::ActionTools).hidden.contains(live),
+        "explicitly hidden live pin remains hidden");
+    for (const bool configured : {false, true}) {
+        auto options = screenshotOptions();
+        options.actions = ScreenshotToolPalette::PinAction;
+        if (configured)
+            options.actionToolsLayout = Layout{layout::actionDefaultPositions(), {}};
+        ScreenshotToolPalette palette(options);
+        prepare(palette);
+        palette.show();
+        flushEvents();
+        adqt::widgets::AdButton* trigger = nullptr;
+        int triggers = 0;
+        for (auto* button : palette.findChildren<adqt::widgets::AdButton*>()) {
+            if (button->property("screenshotToolbarPositionItems").toStringList() == group) {
+                trigger = button;
+                ++triggers;
+            }
+        }
+        require(triggers == 1 && trigger && trigger->property("screenshotToolbarItemId") == pin,
+                "default and configured screenshot toolbars start with one Pin primary");
+        int pins = 0;
+        int lives = 0;
+        QObject::connect(&palette, &ScreenshotToolPalette::pinRequested, [&] { ++pins; });
+        QObject::connect(&palette, &ScreenshotToolPalette::pinWindowRequested, [&] { ++lives; });
+        trigger->click();
+        require(pins == 1 && lives == 0, "initial Pin primary dispatches exactly once");
+        auto* popover = trigger->findChild<adqt::widgets::AdPopover*>();
+        require(popover, "Pin group exposes the standard tool group popup");
+        popover->show();
+        flushEvents();
+        auto* content = popover->contentWidget();
+        auto* liveOption = content ? content->findChild<adqt::widgets::AdButton*>(
+                                         QStringLiteral("screenshotActionToolGroupOption-") + live)
+                                   : nullptr;
+        auto* pinOption = content ? content->findChild<adqt::widgets::AdButton*>(
+                                        QStringLiteral("screenshotActionToolGroupOption-") + pin)
+                                  : nullptr;
+        require(pinOption && liveOption &&
+                    content->layout()->indexOf(pinOption) < content->layout()->indexOf(liveOption),
+                "Pin primary leads the live pin option in the standard popup");
+        liveOption->click();
+        require(pins == 1 && lives == 1 && trigger->property("screenshotToolbarItemId") == live,
+                "live popup action dispatches once and becomes the group primary");
+        trigger->click();
+        require(pins == 1 && lives == 2, "changed primary continues routing the live action");
+        popover->show();
+        flushEvents();
+        content = popover->contentWidget();
+        liveOption = content ? content->findChild<adqt::widgets::AdButton*>(
+                                   QStringLiteral("screenshotActionToolGroupOption-") + live)
+                             : nullptr;
+        require(liveOption, "the lazy popup recreates its live option after action execution");
+        class LivePinTranslator final : public QTranslator {
+          public:
+            bool isEmpty() const override {
+                return false;
+            }
+            QString translate(const char* context, const char* source, const char*,
+                              int) const override {
+                if (qstrcmp(context, "ScreenshotToolPalette") == 0 &&
+                    qstrcmp(source, "Pin Window to Screen") == 0)
+                    return QStringLiteral("Translated live pin");
+                return {};
+            }
+        } translator;
+        require(QApplication::installTranslator(&translator), "install live pin test translator");
+        flushEvents();
+        require(liveOption->accessibleName() == QStringLiteral("Translated live pin") &&
+                    trigger->accessibleName() == QStringLiteral("Translated live pin"),
+                "the selected live primary and materialized option retranslate on LanguageChange");
+        QApplication::removeTranslator(&translator);
+        flushEvents();
+        require(palette.activateScreenshotShortcut(QStringLiteral("pin_to_screen")) && pins == 2 &&
+                    lives == 2 && trigger->property("screenshotToolbarItemId") == pin,
+                "the existing Pin shortcut selects and executes its standard primary");
+    }
+    for (const Layout& custom : {Layout{{{pin, live}}, {}}, Layout{{{pin}, {live}}, {}}}) {
+        auto options = screenshotOptions();
+        options.actions = ScreenshotToolPalette::PinAction;
+        options.actionToolsLayout = custom;
+        ScreenshotToolPalette palette(options);
+        prepare(palette);
+        int lives = 0;
+        QObject::connect(&palette, &ScreenshotToolPalette::pinWindowRequested, [&] { ++lives; });
+        adqt::widgets::AdButton* primary = nullptr;
+        for (auto* button : palette.findChildren<adqt::widgets::AdButton*>()) {
+            if (!button->property("screenshotToolbarPositionItems").toStringList().isEmpty() &&
+                button->property("screenshotToolbarItemId") == live) {
+                primary = button;
+                break;
+            }
+        }
+        require(primary, "a custom stack or independent position can use live pin as primary");
+        primary->click();
+        require(lives == 1, "custom live primary dispatches exactly one live action");
+    }
+}
+
 void speechBubbleSharesSerialNumberToolbarGroup() {
     namespace layout = snow_shot::presentation::toolbar_layout;
     const QStringList group{QStringLiteral("speech-bubble"), QStringLiteral("serial-number")};
@@ -2003,6 +2302,45 @@ void speechBubbleReusesShapeControlsWithIndependentStyles() {
                 palette.creationStyleDefaults().rectangle.shape ==
                     SnowCanvasRectangleShape::Rectangle,
             "the shared shape selector routes to independent Speech Bubble defaults");
+    auto* thought = group->button(3);
+    require(thought != nullptr && group->buttons().size() == 4,
+            "Thought Bubble is the fourth Speech Bubble type after Diamond");
+    require(thought->accessibleName() == QStringLiteral("Thought Bubble"),
+            "Thought Bubble has an accessible English label");
+    class BubbleTranslator final : public QTranslator {
+      public:
+        bool isEmpty() const override {
+            return false;
+        }
+        QString translate(const char* context, const char* source, const char*,
+                          int) const override {
+            if (qstrcmp(context, "ScreenshotToolPalette") == 0 &&
+                qstrcmp(source, "Thought Bubble") == 0)
+                return QStringLiteral("Translated thought bubble");
+            return {};
+        }
+    } translator;
+    require(QApplication::installTranslator(&translator), "install bubble label translator");
+    flushEvents();
+    require(thought->accessibleName() == QStringLiteral("Translated thought bubble"),
+            "Thought Bubble retranslates on LanguageChange");
+    QApplication::removeTranslator(&translator);
+    flushEvents();
+    const int beforeThought = edits;
+    thought->click();
+    require(edits == beforeThought + 1 && palette.creationStyleDefaults().speechBubble.shape ==
+                                              SnowCanvasRectangleShape::ThoughtBubble,
+            "Thought Bubble updates the independent bubble style exactly once");
+    auto* radius =
+        row->findChild<QWidget*>(QStringLiteral("screenshotSelectionCornerRadiusButton"));
+    require(radius != nullptr && radius->isHidden(),
+            "Thought Bubble hides the inapplicable corner-radius editor");
+    const auto storedRadii = palette.creationStyleDefaults().speechBubble.cornerRadii;
+    diamond->click();
+    require(!radius->isHidden() &&
+                palette.creationStyleDefaults().speechBubble.cornerRadii == storedRadii,
+            "switching back restores the corner-radius editor and its requested values");
+    thought->click();
     const auto shapeBefore = palette.creationStyleDefaults().rectangle;
     require(palette.stepStrokeWidth(1) &&
                 palette.creationStyleDefaults().speechBubble.strokeWidth != 4 &&
@@ -2011,6 +2349,13 @@ void speechBubbleReusesShapeControlsWithIndependentStyles() {
     const auto bubble = palette.creationStyleDefaults().speechBubble;
     for (int pass = 0; pass < 8; ++pass) {
         palette.setActiveTool(Tool::Shape);
+        auto* regularRow =
+            palette.findChild<QWidget*>(QStringLiteral("screenshotRectangleStyleControls"));
+        auto* regularSelector =
+            regularRow->findChild<QWidget*>(QStringLiteral("screenshotShapeButtonGroup"));
+        auto* regularGroup = regularSelector->findChild<adqt::widgets::AdRadioButtonGroup*>();
+        require(regularGroup != nullptr && regularGroup->button(3) == nullptr,
+                "Thought Bubble never leaks into the regular Shape selector");
         palette.setActiveTool(Tool::Line);
         palette.setActiveTool(Tool::SpeechBubble);
         flushEvents();
@@ -2035,6 +2380,57 @@ void speechBubbleReusesShapeControlsWithIndependentStyles() {
                 palette.creationStyleDefaults().rectangle.strokeWidth ==
                     options.styleDefaults.rectangle.strokeWidth,
             "resetting preferences retains the active Speech Bubble editor family");
+    if (const auto path = qEnvironmentVariable("SNOW_THOUGHT_BUBBLE_TOOLBAR_PREVIEW");
+        !path.isEmpty()) {
+        auto& manager = snow_shot::presentation::styles::ThemeManager::instance();
+        const auto appearance = manager.themeColorScheme().appearance;
+        auto* selector =
+            palette.findChild<QWidget*>(QStringLiteral("screenshotSpeechBubbleStyleControls"))
+                ->findChild<QWidget*>(QStringLiteral("screenshotShapeButtonGroup"));
+        auto* radios = selector->findChild<adqt::widgets::AdRadioButtonGroup*>();
+        auto* bubbleRadio = radios->button(3);
+        QImage preview(1000, 480, QImage::Format_ARGB32_Premultiplied);
+        preview.fill(Qt::white);
+        QPainter sheet(&preview);
+        int previewRow = 0;
+        for (auto theme : {snow_shot::presentation::styles::ThemeAppearance::Light,
+                           snow_shot::presentation::styles::ThemeAppearance::Dark}) {
+            manager.setThemeAppearance(theme);
+            for (int previewState = 0; previewState < 4; ++previewState, ++previewRow) {
+                selector->setEnabled(true);
+                radios->setCheckedId(previewState >= 2 ? 3 : 2);
+                QEvent leave(QEvent::Leave);
+                QApplication::sendEvent(bubbleRadio, &leave);
+                if (previewState == 1) {
+                    const QPointF center = bubbleRadio->rect().center();
+                    QEnterEvent enter(center, center, bubbleRadio->mapToGlobal(center.toPoint()));
+                    QApplication::sendEvent(bubbleRadio, &enter);
+                }
+                selector->setEnabled(previewState != 3);
+                flushEvents();
+                const auto scheme = manager.themeColorScheme();
+                sheet.fillRect(0, previewRow * 60, 1000, 60, scheme.map.colorBgContainer);
+                sheet.setPen(scheme.map.colorText);
+                sheet.drawText(
+                    8, previewRow * 60 + 35,
+                    QStringList{"Normal", "Hover", "Selected", "Disabled"}.at(previewState));
+                int column = 0;
+                for (qreal dpr : {1.0, 1.25, 1.5, 2.0}) {
+                    QImage image(
+                        QSize(qCeil(selector->width() * dpr), qCeil(selector->height() * dpr)),
+                        QImage::Format_ARGB32_Premultiplied);
+                    image.setDevicePixelRatio(dpr);
+                    image.fill(scheme.map.colorBgContainer);
+                    selector->render(&image);
+                    sheet.drawImage(QPointF(100 + column++ * 220, previewRow * 60 + 14), image);
+                }
+            }
+        }
+        sheet.end();
+        selector->setEnabled(true);
+        manager.setThemeAppearance(appearance);
+        require(preview.save(path), "save actual Thought Bubble toolbar states at fractional DPI");
+    }
 }
 } // namespace
 
@@ -2057,8 +2453,16 @@ int main(int argc, char** argv) {
         speechBubbleReusesShapeControlsWithIndependentStyles();
         return 0;
     }
+    if (application.arguments().contains(QStringLiteral("--airdrop-only"))) {
+        airDropToolbarRoutingAndLayoutMigration();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--print-only"))) {
         printToolbarRoutingAndLayoutMigration();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--live-window-pin-only"))) {
+        liveWindowPinToolbarGroupAndLayoutMigration();
         return 0;
     }
     if (application.arguments().contains(QStringLiteral("--skin-only"))) {
@@ -2074,6 +2478,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     smallToolbarIconStaysVerticallyCentered();
+    liveWindowPinToolbarGroupAndLayoutMigration();
     customToolbarWidgetsKeepCallerMetricsDuringScaling();
     hiddenToolbarPeersKeepVisibleReferenceMetrics();
     drawingSelectsInheritScaleWhenMaterialized();

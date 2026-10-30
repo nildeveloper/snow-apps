@@ -118,6 +118,16 @@ MutationResult selectElement(SnowRuntime runtime, SnowViewport viewport, SnowEle
     return result;
 }
 
+MutationResult clearSelection(SnowRuntime runtime, SnowViewport viewport) {
+    MutationResult result;
+    if (!hasViewport(runtime, viewport)) {
+        return result;
+    }
+    result.success = snow_viewport_clear_selection_ex(
+                         runtime, viewport, result.changedViewports.outParam()) == SNOW_OK;
+    return result;
+}
+
 MutationResult deleteSelected(SnowRuntime runtime, SnowViewport viewport) {
     MutationResult result;
     if (!hasViewport(runtime, viewport)) {
@@ -343,6 +353,17 @@ MutationResult setAngleStylePatch(SnowRuntime runtime, SnowViewport viewport,
     result.success =
         snow_viewport_set_angle_style_patch_ex(runtime, viewport, &style, properties,
                                                result.changedViewports.outParam()) == SNOW_OK;
+    return result;
+}
+
+MutationResult setBracketStylePatch(SnowRuntime runtime, SnowViewport viewport,
+                                    const SnowBracketStyle& style, std::uint32_t properties) {
+    MutationResult result;
+    if (!hasViewport(runtime, viewport))
+        return result;
+    result.success =
+        snow_viewport_set_bracket_style_patch_ex(runtime, viewport, &style, properties,
+                                                 result.changedViewports.outParam()) == SNOW_OK;
     return result;
 }
 

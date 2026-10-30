@@ -107,7 +107,8 @@ typedef enum SnowActiveTool {
     SNOW_ACTIVE_TOOL_DISTANCE = 17,
     SNOW_ACTIVE_TOOL_ANGLE = 18,
     SNOW_ACTIVE_TOOL_MAGNIFIER = 19,
-    SNOW_ACTIVE_TOOL_SPEECH_BUBBLE = 20
+    SNOW_ACTIVE_TOOL_SPEECH_BUBBLE = 20,
+    SNOW_ACTIVE_TOOL_BRACKET = 21
 } SnowActiveTool;
 #define SNOW_ACTIVE_TOOL_FILTER SNOW_ACTIVE_TOOL_RECTANGLE_FILTER
 #define SNOW_ACTIVE_TOOL_HIGHLIGHT SNOW_ACTIVE_TOOL_RECTANGLE_HIGHLIGHT
@@ -146,7 +147,9 @@ typedef enum SnowStyleToolbarSource {
     SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_MAGNIFIER = 30,
     SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_MAGNIFIER = 31,
     SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_SPEECH_BUBBLE = 32,
-    SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_SPEECH_BUBBLE = 33
+    SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_SPEECH_BUBBLE = 33,
+    SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_BRACKET = 34,
+    SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_BRACKET = 35
 } SnowStyleToolbarSource;
 #define SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_FILTER SNOW_STYLE_TOOLBAR_SOURCE_DEFAULT_RECTANGLE_FILTER
 #define SNOW_STYLE_TOOLBAR_SOURCE_SELECTED_FILTER                                                  \
@@ -519,7 +522,8 @@ typedef enum SnowHighlightShape {
 typedef enum SnowRectangleShape {
     SNOW_RECTANGLE_SHAPE_RECTANGLE = 0,
     SNOW_RECTANGLE_SHAPE_ELLIPSE = 1,
-    SNOW_RECTANGLE_SHAPE_DIAMOND = 2
+    SNOW_RECTANGLE_SHAPE_DIAMOND = 2,
+    SNOW_RECTANGLE_SHAPE_THOUGHT_BUBBLE = 3
 } SnowRectangleShape;
 
 typedef enum SnowBrushMode {
@@ -544,6 +548,8 @@ typedef struct SnowShapeStyle {
     SnowHighlightShape highlight_shape;
     SnowRectangleShape shape;
     SnowBrushMode brush_mode;
+    SnowColorRgba8 arrow_outline_color;
+    double arrow_outline_width;
 } SnowShapeStyle;
 
 typedef enum SnowShapeKind {
@@ -566,6 +572,10 @@ typedef enum SnowShapeKind {
 #define SNOW_SHAPE_STYLE_PROPERTY_START_ARROWHEAD (1u << 5)
 #define SNOW_SHAPE_STYLE_PROPERTY_END_ARROWHEAD (1u << 6)
 #define SNOW_SHAPE_STYLE_PROPERTY_STROKE_STYLE (1u << 7)
+#define SNOW_SHAPE_STYLE_PROPERTY_ARROW_OUTLINE_COLOR (1u << 16)
+#define SNOW_SHAPE_STYLE_PROPERTY_ARROW_OUTLINE_WIDTH (1u << 17)
+#define SNOW_SHAPE_STYLE_MIXED_ARROW_OUTLINE_COLOR SNOW_SHAPE_STYLE_PROPERTY_ARROW_OUTLINE_COLOR
+#define SNOW_SHAPE_STYLE_MIXED_ARROW_OUTLINE_WIDTH SNOW_SHAPE_STYLE_PROPERTY_ARROW_OUTLINE_WIDTH
 #define SNOW_SHAPE_STYLE_PROPERTY_ARROW_RATIO (1u << 13)
 #define SNOW_SHAPE_STYLE_PROPERTY_ARROW_SHAFT_TYPE (1u << 12)
 #define SNOW_SHAPE_STYLE_PROPERTY_ARROW_TYPE (1u << 8)
@@ -609,6 +619,8 @@ typedef struct SnowArrowStyle {
     SnowArrowShaftType arrow_shaft_type;
     double arrow_ratio;
     uint8_t reserved0[4];
+    SnowColorRgba8 arrow_outline_color;
+    double arrow_outline_width;
 } SnowArrowStyle;
 
 typedef struct SnowTextStyle {
@@ -654,7 +666,11 @@ typedef enum SnowDistanceUnit {
     SNOW_DISTANCE_UNIT_CM = 1,
     SNOW_DISTANCE_UNIT_M = 2,
     SNOW_DISTANCE_UNIT_KM = 3,
-    SNOW_DISTANCE_UNIT_MM = 4
+    SNOW_DISTANCE_UNIT_MM = 4,
+    SNOW_DISTANCE_UNIT_PT = 5,
+    SNOW_DISTANCE_UNIT_IN = 6,
+    SNOW_DISTANCE_UNIT_FT = 7,
+    SNOW_DISTANCE_UNIT_UM = 8
 } SnowDistanceUnit;
 
 typedef struct SnowDistanceStyle {
@@ -692,6 +708,14 @@ typedef enum SnowAngleType {
     SNOW_ANGLE_TYPE_DIRECTED = 0,
     SNOW_ANGLE_TYPE_INTERIOR = 1,
 } SnowAngleType;
+
+typedef struct SnowBracketStyle {
+    SnowColorRgba8 stroke;
+    double stroke_width;
+} SnowBracketStyle;
+#define SNOW_BRACKET_STYLE_PROPERTY_STROKE (1u << 0)
+#define SNOW_BRACKET_STYLE_PROPERTY_STROKE_WIDTH (1u << 1)
+#define SNOW_BRACKET_STYLE_PROPERTY_ALL 3u
 
 typedef struct SnowAngleStyle {
     SnowColorRgba8 stroke;
@@ -757,7 +781,9 @@ typedef struct SnowStyleToolbarState {
     SnowDistanceStyle distance_style;
     uint32_t distance_style_mixed;
     SnowAngleStyle angle_style;
+    SnowBracketStyle bracket_style;
     uint32_t angle_style_mixed;
+    uint32_t bracket_style_mixed;
     /* Calibrated length before applying the factor; zero without a single valid distance. */
     double distance_measured_length;
     SnowMagnifierStyle magnifier_style;
@@ -781,6 +807,7 @@ typedef struct SnowStyleDefaults {
     SnowRectangleShape spotlight_shape;
     SnowDistanceStyle distance;
     SnowAngleStyle angle;
+    SnowBracketStyle bracket;
     SnowCornerRadii spotlight_corner_radii;
     SnowMagnifierStyle magnifier;
     SnowShapeStyle speech_bubble;
@@ -1434,6 +1461,8 @@ typedef struct SnowSceneDisplayItem {
     const char* font_family_utf8;
     SnowMagnifierGeometry magnifier;
     double text_ink_reserve;
+    SnowColorRgba8 arrow_outline_color;
+    double arrow_outline_width;
 } SnowSceneDisplayItem;
 
 /* Conservative ink (fill padding plus text stroke halo) for dirty regions. */
@@ -1509,6 +1538,8 @@ typedef struct SnowOverlayDisplayItem {
     double snap_marker_size;
     double snap_gap_dash_length;
     double snap_gap_dash_gap;
+    SnowColorRgba8 arrow_outline_color;
+    double arrow_outline_width;
 } SnowOverlayDisplayItem;
 
 SnowError snow_runtime_create(SnowRuntime* out_runtime);
@@ -1649,6 +1680,10 @@ SnowError snow_viewport_set_magnifier_style_patch_ex(
 SnowError snow_viewport_set_angle_style_patch_ex(SnowRuntime runtime, SnowViewport viewport,
                                                  const SnowAngleStyle* style, uint32_t properties,
                                                  SnowChangedViewportList* out_changed_viewports);
+SnowError snow_viewport_set_bracket_style_patch_ex(SnowRuntime runtime, SnowViewport viewport,
+                                                   const SnowBracketStyle* style,
+                                                   uint32_t properties,
+                                                   SnowChangedViewportList* out_changed_viewports);
 SnowError snow_viewport_adjust_angle_value_ex(SnowRuntime runtime, SnowViewport viewport,
                                               double delta_radians,
                                               SnowChangedViewportList* out_changed_viewports);
@@ -1773,6 +1808,10 @@ snow_viewport_commit_text_draft_payload_ex(SnowRuntime runtime, SnowViewport vie
 SnowError snow_viewport_select_element_ex(SnowRuntime runtime, SnowViewport viewport,
                                           SnowElementId id,
                                           SnowChangedViewportList* out_changed_viewports);
+
+/* Clears selection without changing the active tool or document history. */
+SnowError snow_viewport_clear_selection_ex(SnowRuntime runtime, SnowViewport viewport,
+                                           SnowChangedViewportList* out_changed_viewports);
 
 SnowError snow_viewport_reset_editing_state_ex(SnowRuntime runtime, SnowViewport viewport,
                                                SnowChangedViewportList* out_changed_viewports);

@@ -66,6 +66,11 @@ struct SnowCanvasDistanceEdit {
 // Routing is independent of remembering preferences: every successful user edit
 // merges its explicit properties into the corresponding creation style.
 enum class SnowCanvasStyleEditTarget { Creation, Selection };
+struct SnowCanvasBracketStyleEdit {
+    SnowCanvasBracketStyle style;
+    quint32 properties = 0;
+    SnowCanvasStyleEditTarget target = SnowCanvasStyleEditTarget::Creation;
+};
 struct SnowCanvasAngleStyleEdit {
     SnowCanvasAngleStyle style;
     quint32 properties = 0;
@@ -80,7 +85,7 @@ using SnowCanvasStyleEdit =
     std::variant<SnowCanvasShapeEdit, SnowCanvasTextEdit, SnowCanvasSerialNumberEdit,
                  SnowCanvasFilterEdit, SnowCanvasWatermarkEdit, SnowCanvasSpotlightEdit,
                  SnowCanvasBrushEraserEdit, SnowCanvasDistanceEdit, SnowCanvasAngleStyleEdit,
-                 SnowCanvasMagnifierEdit>;
+                 SnowCanvasBracketStyleEdit, SnowCanvasMagnifierEdit>;
 
 inline quint32 snowCanvasCreationStyleProperties(const SnowCanvasStyleEdit& edit) {
     return std::visit(
@@ -94,6 +99,13 @@ inline quint32 snowCanvasCreationStyleProperties(const SnowCanvasStyleEdit& edit
         edit);
 }
 
+inline void snowCanvasMergeStyle(SnowCanvasBracketStyle& target,
+                                 const SnowCanvasBracketStyle& value, quint32 properties) {
+    if (properties & 1u)
+        target.stroke = value.stroke;
+    if (properties & 2u)
+        target.strokeWidth = value.strokeWidth;
+}
 inline void snowCanvasMergeStyle(SnowCanvasAngleStyle& target, const SnowCanvasAngleStyle& value,
                                  quint32 properties) {
     if (properties & static_cast<quint32>(SnowCanvasAngleStyleProperty::Stroke))
@@ -170,6 +182,10 @@ inline void snowCanvasMergeStyle(SnowCanvasShapeStyle& target, const SnowCanvasS
         target.strokeRenderingStyle = value.strokeRenderingStyle;
     if ((properties & SnowCanvasShapeStylePropertyArrowShaftType) != 0)
         target.arrowShaftType = value.arrowShaftType;
+    if ((properties & SnowCanvasShapeStylePropertyArrowOutlineColor) != 0)
+        target.arrowOutlineColor = value.arrowOutlineColor;
+    if ((properties & SnowCanvasShapeStylePropertyArrowOutlineWidth) != 0)
+        target.arrowOutlineWidth = value.arrowOutlineWidth;
     if ((properties & SnowCanvasShapeStylePropertyArrowRatio) != 0)
         target.arrowRatio = value.arrowRatio;
     if ((properties & SnowCanvasShapeStylePropertyArrowType) != 0)
@@ -330,6 +346,8 @@ inline void snowCanvasMergeStyleEdit(SnowCanvasStyleDefaults& defaults,
                 snowCanvasMergeStyle(defaults.distance, patch.style, patch.properties);
             } else if constexpr (std::is_same_v<T, SnowCanvasAngleStyleEdit>) {
                 snowCanvasMergeStyle(defaults.angle, patch.style, patch.properties);
+            } else if constexpr (std::is_same_v<T, SnowCanvasBracketStyleEdit>) {
+                snowCanvasMergeStyle(defaults.bracket, patch.style, patch.properties);
             } else if constexpr (std::is_same_v<T, SnowCanvasMagnifierEdit>) {
                 snowCanvasMergeStyle(defaults.magnifier, patch.style, patch.properties);
             } else if constexpr (std::is_same_v<T, SnowCanvasTextEdit>) {

@@ -12,11 +12,17 @@
 #include "snow_shot/presentation/screenshotautofiltercontroller.h"
 #include "snow_shot/presentation/screenshotsourceimagecomposer.h"
 #include "snow_shot/presentation/screenshotcontroller.h"
+#ifdef SNOW_SHOT_CONTROLLER_LIFETIME_TESTS
+#include "../../../tests/screenshot_controller_test_access.h"
+#endif
 #include "snow_shot/presentation/screenshotexportnaming.h"
+#include "snow_shot/presentation/screenshotlivewindowrequest.h"
 #include "snow_shot/presentation/globalshortcuttypes.h"
 #include "snow_shot/presentation/screenshotprintservice.h"
+#include "snow_shot/presentation/screenshotairdropservice.h"
 #include "screenshotprintinteractionguard.h"
 #include "screenshotprintcompletion.h"
+#include "screenshotairdropcompletion.h"
 #include "snow_shot/presentation/screenshotcontentdrop.h"
 #include "snow_shot/presentation/screenshotoverlaycanvaspresenter.h"
 #include "snow_shot/presentation/screenshottoolbarpresentationstatefactory.h"
@@ -412,6 +418,7 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void setLineTool() override;
     void setDistanceTool() override;
     void setAngleTool() override;
+    void setBracketTool() override;
     void setFreeDrawTool() override;
     void setHighlightTool() override;
     void setPenHighlightTool() override;
@@ -473,6 +480,12 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void endScrollingSelectionMove() override;
     QPoint scrollingMovePhysicalPointer(QPoint position) const;
     void pinSelectionToScreen() override;
+    void pinWindowSelectionToScreen() override;
+    void cancelLivePinInitialization();
+    void completePinExport(bool success, quint64 generation,
+                           std::shared_ptr<ScreenshotExportArtifact> artifact,
+                           std::shared_ptr<std::optional<ScreenshotHistoryEntry>> historyCandidate,
+                           std::optional<ScreenshotCopyOutputOptions> copyOutput, bool scrolling);
     void pinClipboardContentToScreen();
     void pinHistoryRecord(const QString& recordId);
     void pinSelectedFilesToScreen(snow_shot::platform::SelectedFileTarget target);
@@ -485,6 +498,7 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void restorePinnedWindows();
     void restoreActivePinnedGroupWindows();
     void printSelection() override;
+    void airDropSelection() override;
     void saveSelectionToFile() override;
     void saveSelectionWithSnowDialog();
     void saveRecognitionResultWithSystemDialog(const ScreenshotRecognitionFileSnapshot& snapshot);
@@ -659,11 +673,15 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     std::optional<ScreenshotHistoryEntry> m_pendingMcpDocument;
     std::function<void(bool)> m_pendingMcpDocumentCompletion;
     quint64 m_imageExportGeneration = 0;
+    std::shared_ptr<snow_shot::presentation::LiveWindowSource> m_livePinInitializing;
     QSet<quint64> m_activeImageExports;
     std::function<void()> m_cancelSaveDialog;
     QPointer<ScreenshotPrintService> m_printService;
     std::shared_ptr<ScreenshotExportArtifact> m_printArtifact;
     bool m_printPending = false;
+    QPointer<ScreenshotAirDropService> m_airDropService;
+    std::shared_ptr<ScreenshotExportArtifact> m_airDropArtifact;
+    bool m_airDropPending = false;
     QHash<quint64, quint64> m_imageExportCaptureEpochs;
     quint64 m_captureEpoch = 0;
     ScreenshotExportJobHandle m_exportJob;
@@ -778,6 +796,9 @@ ScreenshotController::Impl::Impl(ScreenshotController& controller,
                            m_ocrRecognition != nullptr) {
                     m_ocrRecognition->setTextDetectionProcessing(
                         screenshotOcrTextDetectionProcessingFromValue(value.toString()));
+                } else if (key == QStringLiteral("text_recognition/hardware_acceleration") &&
+                           m_ocrRecognition != nullptr) {
+                    m_ocrRecognition->setHardwareAcceleration(value.toBool());
                 } else if (key == QStringLiteral("network/proxy")) {
                     if (m_ocrRecognition != nullptr) {
                         m_ocrRecognition->setProxyUrl(resolvedOcrProxyUrl(value.toString()));
@@ -1103,10 +1124,23 @@ ScreenshotToolbarWindow* ScreenshotController::Impl::toolbarForShortcut() {
 }
 
 bool ScreenshotController::Impl::activateScreenshotShortcut(const QString& actionId) {
+    if (actionId == QStringLiteral("text_recognition_copy")) {
+        const QScopedValueRollback<bool> copyGuard(m_activatingOcrCopy, true);
+        return activateScreenshotShortcut(QStringLiteral("text_recognition"));
+    }
     ScreenshotToolbarWindow* toolbar = toolbarForShortcut();
     ScreenshotToolPalette* palette = toolbar != nullptr ? toolbar->palette() : nullptr;
     if (palette)
         palette->setCloudUploadBusy(m_cloudUploadPreparing || m_cloudUploadJob);
+    if (palette != nullptr && m_activatingOcrCopy &&
+        actionId == QStringLiteral("text_recognition") &&
+        m_interaction.activeTool() == ScreenshotActiveTool::Ocr) {
+        if (!palette->canActivateScreenshotShortcut(actionId))
+            return false;
+        // Copying an existing OCR result must not toggle the active tool off.
+        setOcrTool();
+        return true;
+    }
     return palette != nullptr && palette->activateScreenshotShortcut(actionId);
 }
 
@@ -1223,6 +1257,10 @@ bool ScreenshotController::Impl::ensureRecognitionFeature() {
     const QScopedValueRollback<bool> constructingGuard(m_constructingRecognitionFeature, true);
     auto& applicationStorage = snow_shot::storage::ApplicationStorage::instance();
     ScreenshotOcrRecognitionService::Options ocrOptions;
+    ocrOptions.hardwareAcceleration =
+        applicationStorage.configuration()
+            .value(QStringLiteral("text_recognition/hardware_acceleration"))
+            .toBool();
     ocrOptions.modelType =
         screenshotOcrModelTypeFromValue(applicationStorage.configuration()
                                             .value(QStringLiteral("text_recognition/model_type"))
@@ -1535,6 +1573,12 @@ bool ScreenshotController::Impl::ensureExportFeature() {
         [controller = QPointer<ScreenshotController>(&owner)](const QString& id) {
             if (controller)
                 emit controller->pinnedImageEditingRequested(id);
+        });
+    exportUiServices->setLiveImageEditingHandler(
+        [controller =
+             QPointer<ScreenshotController>(&owner)](const ScreenshotExportSource& source) {
+            if (controller)
+                emit controller->scrollingImageEditingRequested(source);
         });
     m_exportService = std::move(exportService);
     exportUiServices->setRestoreFailureHandler([this]() {
@@ -2185,6 +2229,7 @@ void ScreenshotController::Impl::requestRecapture() {
         return;
     }
 
+    cancelLivePinInitialization();
     cancelCloudUpload();
     m_recaptureBusy = true;
 #if SNOW_SHOT_ENABLE_QR_RECOGNITION
@@ -2572,6 +2617,9 @@ bool ScreenshotController::Impl::activateToolForSelectionResize(ScreenshotActive
     case ScreenshotActiveTool::Angle:
         setAngleTool();
         break;
+    case ScreenshotActiveTool::Bracket:
+        setBracketTool();
+        break;
     case ScreenshotActiveTool::FreeDraw:
         setFreeDrawTool();
         break;
@@ -2700,6 +2748,13 @@ void ScreenshotController::Impl::setAngleTool() {
     deactivateRecognition();
     const bool scrollingCaptureStopped = stopScrollingCapture(true);
     m_toolCommandWorkflow->setAngleTool();
+    restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
+}
+
+void ScreenshotController::Impl::setBracketTool() {
+    deactivateRecognition();
+    const bool scrollingCaptureStopped = stopScrollingCapture(true);
+    m_toolCommandWorkflow->setBracketTool();
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
@@ -3054,6 +3109,7 @@ void ScreenshotController::Impl::hideCapturePresentationImmediately() {
 }
 
 void ScreenshotController::Impl::detachCaptureForExport(ExportDetachMode mode) {
+    cancelLivePinInitialization();
     SNOW_SHOT_PIN_PERF_SCOPE("controller.detach_capture");
     SNOW_SHOT_PIN_PERF_MILESTONE("controller.detach_capture.enter");
     if (mode == ExportDetachMode::Immediate) {
@@ -3212,16 +3268,131 @@ void ScreenshotController::Impl::openScrollingScreenshotImage(bool editing) {
     detachCaptureForExport(ExportDetachMode::Immediate);
 }
 
+void ScreenshotController::Impl::cancelLivePinInitialization() {
+    if (auto source = std::exchange(m_livePinInitializing, {}))
+        source->shutdown();
+}
+
+void ScreenshotController::Impl::pinWindowSelectionToScreen() {
+    using namespace snow_shot::presentation;
+    if (!ensureExportFeature() || m_captureState.sessionState != ScreenshotSessionState::Editing)
+        return;
+    cancelLivePinInitialization();
+    const auto excludedHandles = m_overlayCoordinator->excludedHwnds(m_displaySession);
+    QVector<quintptr> excluded;
+    excluded.reserve(excludedHandles.size());
+    for (const auto handle : excludedHandles)
+        excluded.push_back(static_cast<quintptr>(handle));
+    const QRect selection = m_scrollingCaptureController && m_scrollingCaptureController->active()
+                                ? m_scrollingCaptureController->canvasSelection()
+                                : m_selection.pixelSelection();
+    const auto request = screenshotLiveWindowRequest(selection, m_displaySession, m_geometry,
+                                                     excluded, liveWindowTargetAtPoint);
+    if (!request || request->screen.isNull()) {
+        m_messages->error(
+            QStringLiteral("screenshot-pin-window"),
+            QCoreApplication::translate("ScreenshotController",
+                                        "No capturable window was found in the selection."));
+        return;
+    }
+    auto source = createLiveWindowSource(request->target, request->nativeSelection);
+    if (!source) {
+        m_messages->error(
+            QStringLiteral("screenshot-pin-window"),
+            QCoreApplication::translate("ScreenshotController",
+                                        "Live window display could not be initialized."));
+        return;
+    }
+    m_livePinInitializing = source;
+    const QPointer<ScreenshotController> receiver(&owner);
+    const auto epoch = m_captureEpoch;
+    const auto revision = m_selection.changeRevision();
+    const std::weak_ptr<LiveWindowSource> weakSource(source);
+    source->initialize([receiver, weakSource, epoch, revision,
+                        screen = request->screen](bool initialized, const QString& error) {
+        const auto source = weakSource.lock();
+        if (!source)
+            return;
+        if (!receiver || !receiver->m_impl || receiver->m_impl->m_livePinInitializing != source) {
+            source->shutdown();
+            return;
+        }
+        auto& impl = *receiver->m_impl;
+        if (impl.m_captureEpoch != epoch || impl.m_selection.changeRevision() != revision ||
+            impl.m_captureState.sessionState != ScreenshotSessionState::Editing) {
+            impl.cancelLivePinInitialization();
+            return;
+        }
+        if (!initialized || screen.isNull() || source->initialDesktopRegion().isEmpty()) {
+            impl.cancelLivePinInitialization();
+            impl.m_messages->error(
+                QStringLiteral("screenshot-pin-window"),
+                error.isEmpty()
+                    ? QCoreApplication::translate("ScreenshotController",
+                                                  "Live window display could not be initialized.")
+                    : error);
+            return;
+        }
+        const auto completed = std::make_shared<bool>(false);
+        const auto complete = [receiver, source, epoch, revision, completed](bool presented,
+                                                                             QImage) {
+            if (std::exchange(*completed, true))
+                return;
+            if (!receiver || !receiver->m_impl) {
+                source->shutdown();
+                return;
+            }
+            auto& impl = *receiver->m_impl;
+            if (impl.m_livePinInitializing != source || impl.m_captureEpoch != epoch ||
+                impl.m_selection.changeRevision() != revision ||
+                impl.m_captureState.sessionState != ScreenshotSessionState::Editing) {
+                if (impl.m_livePinInitializing == source)
+                    impl.m_livePinInitializing.reset();
+                source->shutdown();
+                return;
+            }
+            impl.m_livePinInitializing.reset();
+            if (presented) {
+                impl.detachCaptureForExport();
+            } else {
+                source->shutdown();
+                impl.m_messages->error(
+                    QStringLiteral("screenshot-pin-window"),
+                    QCoreApplication::translate("ScreenshotController",
+                                                "Live window display could not be initialized."));
+            }
+        };
+        const QRect nativeRegion = source->initialDesktopRegion();
+        if (!impl.m_selectionExportUiServices->presentLiveWindow(source, screen, nativeRegion,
+                                                                 nativeRegion.size(), complete))
+            complete(false, {});
+    });
+}
+
 void ScreenshotController::Impl::pinSelectionToScreen() {
     if (!ensureExportFeature()) {
         return;
     }
     const snow_shot::storage::ScreenshotSettings settings;
+    const bool scrolling =
+        m_scrollingCaptureController != nullptr && m_scrollingCaptureController->active();
+    std::optional<ScreenshotCopyOutputOptions> copyOutput;
+    if (settings.copyAfterPinningToScreen()) {
+        copyOutput = ScreenshotCopyOutputOptions{
+            settings.autoSaveAfterExecution(QStringLiteral("pin_to_screen")) ||
+                settings.autoSaveAfterExecution(scrolling
+                                                    ? QStringLiteral("copy_scrolling_screenshot")
+                                                    : QStringLiteral("copy_screenshot")),
+            settings.copyImageFileToClipboard(),
+            {}};
+        if (copyOutput->autoSave || copyOutput->copyFileToClipboard)
+            copyOutput->file = automaticSaveRequest(settings, copyOutput->autoSave);
+    }
     const std::optional<ScreenshotAutomaticSaveRequest> automaticSave =
-        settings.autoSaveAfterExecution(QStringLiteral("pin_to_screen"))
+        !copyOutput && settings.autoSaveAfterExecution(QStringLiteral("pin_to_screen"))
             ? std::optional(automaticSaveRequest(settings))
             : std::nullopt;
-    if (m_scrollingCaptureController != nullptr && m_scrollingCaptureController->active()) {
+    if (scrolling) {
         const QSize sourceSize = m_scrollingCaptureController->trimmedSize();
         if (sourceSize.isEmpty()) {
             return;
@@ -3251,8 +3422,8 @@ void ScreenshotController::Impl::pinSelectionToScreen() {
             return;
         }
         SNOW_SHOT_PIN_PERF_MILESTONE("controller.export_scheduled");
-        // The detached snapshot owns the shared source used by presentation and both
-        // persistence subscribers.
+        // The detached snapshot owns the shared source used by presentation and export
+        // subscribers.
         const qreal sourceScale =
             snow_shot::presentation::kPinnedGeometryUnits ==
                     snow_shot::presentation::PinnedGeometryUnits::LogicalPixels
@@ -3274,7 +3445,7 @@ void ScreenshotController::Impl::pinSelectionToScreen() {
             return;
         }
         const bool scheduled = m_scrollingCaptureController->requestTrimmedSnapshot(
-            [receiver, targetScreen, fit, historyCandidate, automaticSave,
+            [receiver, targetScreen, fit, historyCandidate, automaticSave, copyOutput,
              generation = *exportGeneration](ScreenshotScrollingSnapshot snapshot) mutable {
                 if (receiver.isNull() || receiver->m_impl == nullptr ||
                     !receiver->m_impl->imageExportCurrent(generation)) {
@@ -3305,8 +3476,8 @@ void ScreenshotController::Impl::pinSelectionToScreen() {
                     receiver->m_impl->m_selectionExportUiServices != nullptr &&
                     receiver->m_impl->m_selectionExportUiServices->presentPinnedImageArtifact(
                         artifact, targetScreen, fit.nativeGeometry, fit.initialWindowSize,
-                        [receiver, artifact, historyCandidate, generation](bool success,
-                                                                           QImage) mutable {
+                        [receiver, artifact, historyCandidate, generation,
+                         copyOutput](bool success, QImage) mutable {
                             SNOW_SHOT_PIN_PERF_MILESTONE("controller.presentation_complete");
                             SNOW_SHOT_PIN_PERF_FINISH(success);
                             if (receiver.isNull() || receiver->m_impl == nullptr ||
@@ -3321,14 +3492,9 @@ void ScreenshotController::Impl::pinSelectionToScreen() {
                                         "ScreenshotController",
                                         "The scrolling screenshot could not be pinned"));
                             }
-                            if (success) {
-                                receiver->m_impl->publishHistoryResult(
-                                    std::move(historyCandidate),
-                                    snow_shot::storage::CaptureHistorySource::PinnedToScreen,
-                                    artifact);
-                            }
-                            receiver->m_impl->completeScrollingResultExport(generation);
-                            receiver->m_impl->scheduleDeferredExportCleanup();
+                            receiver->m_impl->completePinExport(success, generation, artifact,
+                                                                std::move(historyCandidate),
+                                                                std::move(copyOutput), true);
                         },
                         automaticSave);
                 SNOW_SHOT_PIN_PERF_MILESTONE("controller.presented");
@@ -3425,7 +3591,15 @@ void ScreenshotController::Impl::pinSelectionToScreen() {
                     receiver, [callback = std::move(callback)](bool success, QImage image) mutable {
                         callback(success ? std::move(image) : QImage{});
                     });
-            }));
+            },
+            copyOutput
+                ? m_exportService->prepareClipboardPlacement(m_selection.pixelSelection(), style,
+                                                             m_selection.exportLayoutCompaction())
+                : std::nullopt,
+            copyOutput ? std::optional(screenshotSelectionClipboardAppearance(
+                             m_selection.pixelSelection().size(), style,
+                             m_selection.exportLayoutCompaction()))
+                       : std::nullopt));
     if (automaticSave.has_value()) {
         std::erase_if(m_saveArtifacts, [](const auto& weak) { return weak.expired(); });
         m_saveArtifacts.push_back(artifact);
@@ -3433,41 +3607,20 @@ void ScreenshotController::Impl::pinSelectionToScreen() {
     const QPointer<ScreenshotController> receiver(&owner);
     const bool presented = m_selectionExportUiServices->presentPinnedArtifact(
         *request, artifact,
-        [receiver, artifact, historyCandidate, generation = *exportGeneration](bool success,
-                                                                               QImage) mutable {
+        [receiver, artifact, historyCandidate, copyOutput,
+         generation = *exportGeneration](bool success, QImage) mutable {
             SNOW_SHOT_PIN_PERF_SCOPE("controller.pin_result_callback");
             SNOW_SHOT_PIN_PERF_FINISH(success);
             if (receiver.isNull() || receiver->m_impl == nullptr ||
-                !receiver->m_impl->finishImageExport(generation)) {
+                !receiver->m_impl->imageExportCurrent(generation)) {
                 return;
             }
-            if (success && historyCandidate != nullptr && historyCandidate->has_value()) {
-                const bool encodingStarted = artifact->requestCanonicalPng(
-                    receiver,
-                    [receiver, historyCandidate](ScreenshotExportEncodingResult encoded) mutable {
-                        if (receiver.isNull() || receiver->m_impl == nullptr) {
-                            return;
-                        }
-                        if (!encoded.succeeded()) {
-                            qWarning("Screenshot history PNG encoding failed: %s",
-                                     qPrintable(encoded.error));
-                            return;
-                        }
-                        historyCandidate->value().preparedResultImage = std::move(encoded.image);
-                        historyCandidate->value().source =
-                            snow_shot::storage::CaptureHistorySource::PinnedToScreen;
-                        if (receiver->m_impl->m_historyService != nullptr) {
-                            receiver->m_impl->m_historyService->commit(
-                                std::move(historyCandidate->value()));
-                        }
-                    });
-                if (!encodingStarted) {
-                    qWarning("Screenshot history PNG encoding could not be started");
-                }
-            } else if (!success) {
+            if (!success) {
                 qWarning("Screenshot pin export failed");
             }
-            receiver->m_impl->scheduleDeferredExportCleanup();
+            receiver->m_impl->completePinExport(success, generation, artifact,
+                                                std::move(historyCandidate), std::move(copyOutput),
+                                                false);
         },
         automaticSave);
     if (!presented) {
@@ -3483,6 +3636,33 @@ void ScreenshotController::Impl::pinSelectionToScreen() {
     hideCapturePresentationImmediately();
     SNOW_SHOT_PIN_PERF_MILESTONE("controller.presentation_hidden");
     detachCaptureForExport(ExportDetachMode::DeferredPresentation);
+}
+
+void ScreenshotController::Impl::completePinExport(
+    bool success, quint64 generation, std::shared_ptr<ScreenshotExportArtifact> artifact,
+    std::shared_ptr<std::optional<ScreenshotHistoryEntry>> historyCandidate,
+    std::optional<ScreenshotCopyOutputOptions> copyOutput, bool scrolling) {
+    if (!imageExportCurrent(generation))
+        return;
+    if (success && copyOutput) {
+        // Start clipboard/file work after the pin's first frame. Merge the pin and copy
+        // auto-save scenarios into one request so they cannot create duplicate files.
+        saveArtifactForCopy(artifact, generation, std::move(*copyOutput),
+                            snow_shot::storage::CaptureHistorySource::PinnedToScreen, {},
+                            scrolling);
+    } else if (scrolling) {
+        completeScrollingResultExport(generation);
+    } else {
+        static_cast<void>(finishImageExport(generation));
+    }
+    if (success) {
+        // Subscribe history after copying so clipboard preparation can join PNG encoding.
+        // Record the successful pin even if the optional clipboard operation fails later.
+        publishHistoryResult(std::move(historyCandidate),
+                             snow_shot::storage::CaptureHistorySource::PinnedToScreen,
+                             std::move(artifact));
+    }
+    scheduleDeferredExportCleanup();
 }
 
 QPoint ScreenshotController::Impl::scrollingMovePhysicalPointer(QPoint position) const {
@@ -4505,7 +4685,7 @@ void ScreenshotController::Impl::printSelection() {
                 {{QStringLiteral("request_kind"), QStringLiteral("capture")},
                  {QStringLiteral("operation"), QString::number(epoch)},
                  {QStringLiteral("stage"), !snapshotSucceeded ? QStringLiteral("export_image")
-                                           : !printer         ? QStringLiteral("service_destroyed")
+                                           : !printer ? QStringLiteral("service_destroyed")
                                                       : QStringLiteral("service_rejected")}},
                 QtWarningMsg);
             finished({ScreenshotPrintService::Status::Failed,
@@ -4531,6 +4711,98 @@ void ScreenshotController::Impl::printSelection() {
 
 void ScreenshotController::setPrintService(ScreenshotPrintService* service) {
     m_impl->m_printService = service;
+}
+
+void ScreenshotController::setAirDropService(ScreenshotAirDropService* service) {
+    m_impl->m_airDropService = service;
+}
+
+void ScreenshotController::Impl::airDropSelection() {
+    using Service = ScreenshotAirDropService;
+    auto& service = m_airDropService ? *m_airDropService : Service::shared();
+    if (m_airDropPending || !m_activeImageExports.isEmpty() ||
+        owner.property("saveDialogOpen").toBool() || service.busy() ||
+        QApplication::activeModalWidget() || !m_selection.hasPixelSelection() ||
+        !ensureExportFeature() || !resetCanvasEditingState())
+        return;
+    rememberKeyboardOwner(QApplication::focusWidget());
+    const QPointer<ScreenshotOverlayWindow> keyboardOwner(keyboardOwnerOverlay());
+    const QRectF selection = m_scrollingCaptureController && m_scrollingCaptureController->active()
+                                 ? QRectF(m_scrollingCaptureController->canvasSelection())
+                                 : m_selection.normalizedSelection();
+    const QPointer<ScreenshotOverlayWindow> dialogOwner(
+        screenshotSelectionDialogOwner(m_displaySession, m_geometry, selection, keyboardOwner));
+    if (!dialogOwner)
+        return;
+    QList<QWidget*> windows;
+    for (qsizetype i = 0; i < m_displaySession.size(); ++i)
+        windows.append(m_displaySession.overlayAt(i));
+    windows.append(m_overlayCoordinator->toolbar());
+    const auto interaction = std::make_shared<ScreenshotPrintInteractionGuard>(windows);
+    const auto suspension = m_windowShortcutManager ? m_windowShortcutManager->suspendInput() : 0;
+    const quint64 epoch = m_captureEpoch;
+    m_airDropPending = true;
+    owner.setProperty("saveDialogOpen", true);
+    const QPointer<ScreenshotController> receiver(&owner);
+    const QPointer<Service> sharing(&service);
+    const auto completed = std::make_shared<bool>(false);
+    const auto finished = screenshotAirDropCompletion(
+        completed,
+        [receiver, epoch, suspension, interaction] {
+            interaction->release();
+            if (!receiver || !receiver->m_impl)
+                return false;
+            auto& impl = *receiver->m_impl;
+            impl.m_airDropPending = false;
+            impl.m_airDropArtifact.reset();
+            receiver->setProperty("saveDialogOpen", false);
+            if (impl.m_windowShortcutManager && suspension)
+                impl.m_windowShortcutManager->resumeInput(suspension);
+            if (impl.m_captureEpoch != epoch)
+                return false;
+            if (impl.m_scrollingCaptureController)
+                impl.m_scrollingCaptureController->setExportPaused(false);
+            return true;
+        },
+        [receiver] { receiver->m_impl->cancelCapture(); },
+        [receiver, keyboardOwner](Service::Result result) {
+            auto& impl = *receiver->m_impl;
+            impl.restoreKeyboardOwnerQueued(keyboardOwner);
+            if (result.status == Service::Status::Failed ||
+                result.status == Service::Status::Unavailable)
+                impl.m_messages->error(
+                    QStringLiteral("screenshot-airdrop"),
+                    QCoreApplication::translate("ScreenshotAirDropService",
+                                                "The image could not be shared with AirDrop: %1")
+                        .arg(result.error));
+        });
+    const auto ready = [receiver, dialogOwner, sharing, epoch, finished,
+                        completed](ScreenshotExportImageResult result) {
+        if (*completed || !receiver || !receiver->m_impl)
+            return;
+        auto& impl = *receiver->m_impl;
+        if (impl.m_captureEpoch != epoch || !dialogOwner) {
+            finished({Service::Status::Cancelled, {}});
+            return;
+        }
+        if (impl.m_scrollingCaptureController && impl.m_scrollingCaptureController->active())
+            impl.m_scrollingCaptureController->setExportPaused(true);
+        const QString filename =
+            ScreenshotImageFileService::suggestedBaseName(
+                snow_shot::storage::ScreenshotSettings().manualSaveFilenameFormat()) +
+            QStringLiteral(".png");
+        if (!result.succeeded() || !sharing ||
+            !sharing->shareImage(receiver, dialogOwner, std::move(result.image), filename,
+                                 finished))
+            finished({Service::Status::Failed,
+                      result.error.isEmpty() ? QCoreApplication::translate(
+                                                   "ScreenshotAirDropService",
+                                                   "The image could not be prepared for AirDrop")
+                                             : result.error});
+    };
+    m_airDropArtifact = owner.mcpExportArtifact(1.0);
+    if (!m_airDropArtifact || !m_airDropArtifact->requestImage(&owner, ready))
+        ready({});
 }
 
 void ScreenshotController::Impl::saveSelectionToFile() {
@@ -4952,6 +5224,7 @@ void ScreenshotController::Impl::publishHistoryResult(
 }
 
 void ScreenshotController::Impl::cancelCapture() {
+    cancelLivePinInitialization();
     hideCapturePresentationImmediately();
     if (m_shortcutExitConfirmation != nullptr) {
         m_shortcutExitConfirmation->dismiss();
@@ -5655,7 +5928,7 @@ ScreenshotController::Impl::canvasColorPreviewAtPhysicalPoint(ScreenshotOverlayW
     SnowCanvasWidget* canvas = overlay != nullptr ? overlay->canvas() : nullptr;
     if (display == nullptr || canvas == nullptr ||
         !display->physicalRect.contains(physicalPosition) ||
-        !m_canvasColorSampler.ensureSnapshot(*canvas, display->physicalRect)) {
+        !m_canvasColorSampler.ensureContentSnapshot(*canvas, display->physicalRect)) {
         return {};
     }
     return m_canvasColorSampler.previewAtPhysicalPoint(physicalPosition);
@@ -6140,6 +6413,7 @@ void ScreenshotController::Impl::shutdown() {
     if (m_selectionExportUiServices != nullptr) {
         m_selectionExportUiServices->cancelClipboardPublication();
     }
+    cancelLivePinInitialization();
     cancelContentPin();
     m_filePinQueue.cancel();
     cancelHistoryPins();
@@ -6600,6 +6874,38 @@ void ScreenshotController::mcpPinSelectionToScreen() {
     }
 }
 
+#ifdef SNOW_SHOT_CONTROLLER_LIFETIME_TESTS
+void ScreenshotControllerTestAccess::prepareSelection(ScreenshotController& controller,
+                                                      QImage image,
+                                                      const ScreenshotSelectionParams& selection) {
+    auto& state = *controller.m_impl;
+    state.m_displaySession.clear();
+    CapturedDisplayModel display;
+    display.stableId = QStringLiteral("pin-copy-fixture");
+    display.screen = QGuiApplication::primaryScreen();
+    display.physicalRect = QRect(QPoint(0, 0), image.size());
+    display.canvasRect = display.physicalRect;
+    display.logicalRect = display.physicalRect;
+    display.imageSourceCanvasRect = display.physicalRect;
+    display.image = std::move(image);
+    display.active = true;
+    state.m_displaySession.appendDisplay(std::move(display));
+    state.m_geometry.rebuild(state.m_displaySession);
+    if (selection.selection.isEmpty())
+        state.m_selection.clearSelection();
+    else
+        static_cast<void>(state.m_selection.applyParams(
+            selection, state.m_geometry.canvasBounds().toAlignedRect()));
+    state.m_interaction.beginCapture();
+    state.m_interaction.confirmSelection();
+    state.m_captureState.sessionState = ScreenshotSessionState::Editing;
+}
+
+bool ScreenshotControllerTestAccess::exportActive(const ScreenshotController& controller) {
+    return !controller.m_impl->m_activeImageExports.isEmpty();
+}
+#endif
+
 void ScreenshotController::mcpUndoCanvasEdit() {
     if (m_impl != nullptr) {
         static_cast<void>(m_impl->m_canvasRuntime.undo());
@@ -6713,6 +7019,7 @@ const std::pair<const char*, ScreenshotActiveTool> mcpTools[] = {
     {"arrow", ScreenshotActiveTool::Arrow},
     {"distance", ScreenshotActiveTool::Distance},
     {"angle", ScreenshotActiveTool::Angle},
+    {"bracket", ScreenshotActiveTool::Bracket},
     {"line", ScreenshotActiveTool::Line},
     {"freehand", ScreenshotActiveTool::FreeDraw},
     {"rectangle_highlight", ScreenshotActiveTool::RectangleHighlight},

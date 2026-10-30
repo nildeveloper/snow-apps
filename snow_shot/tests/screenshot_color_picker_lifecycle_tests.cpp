@@ -3,12 +3,14 @@
 #include "snow_shot/presentation/screenshotselectiontoolbarwidget.h"
 #include "snow_shot/presentation/screenshotcanvastoolstyles.h"
 #include "snow_shot/presentation/screenshotcanvascolorsamplerwindow.h"
+#include "snow_shot/presentation/screenshotcanvascolorsampler.h"
 #include "snow_shot/platform/screenshotnative.h"
 #ifdef Q_OS_MACOS
 #import <AppKit/AppKit.h>
 #endif
 #include "snow_shot/presentation/screenshotcolorpickerwindow.h"
 #include "snow_shot/presentation/screenshotcolorpickercontroller.h"
+#include "snow_shot/presentation/screenshotshortcutexitconfirmation.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
 #include "snow_shot/platform/physicalcursor.h"
 #include "snow_shot/presentation/screenshotoverlayuihost.h"
@@ -29,6 +31,7 @@
 #include "widgets/tooltip.h"
 #include "widgets/button.h"
 #include "widgets/color_picker.h"
+#include "widgets/modal.h"
 #include "widgets/popup_interaction_host.h"
 #include "widgets/detail/overlay_popup_surface.h"
 
@@ -52,6 +55,7 @@
 #include <QWindow>
 #include <QTimerEvent>
 
+#include <algorithm>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -1977,6 +1981,77 @@ void startupPickerUsesResolvedOwnerWithoutSamplingNativeCursor() {
     storage.shutdown();
 }
 
+void canvasSamplerExcludesScreenshotSelectionUi() {
+    NoopOverlayEventSink sink;
+    SnowCanvasRuntime runtime;
+    ScreenshotOverlayWindow overlay(sink, new SnowCanvasWidget(runtime));
+    overlay.setCaptureGeometry(QRect(0, 0, 160, 100));
+    overlay.show();
+    auto& canvas = *overlay.canvas();
+    require(canvas.setViewportCamera(80, 50, 1), "configure the sampling test viewport");
+    QImage image(160, 100, QImage::Format_ARGB32_Premultiplied);
+    image.fill(QColor(180, 160, 140));
+    overlay.setScreenshotImage(image, image.rect());
+    overlay.setScreenshotMaskVisible(true);
+    overlay.setScreenshotMaskColor(QColor(0, 0, 0, 180));
+    overlay.setScreenshotSelection(QRectF(40, 25, 80, 50), true, 0);
+    overlay.setScreenshotSelectionBorderColor(Qt::cyan);
+    overlay.setScreenshotSelectionBorderVisible(true);
+    require(
+        !runtime
+             .applyAnnotationTransaction(QByteArrayLiteral(
+                 R"({"version":1,"operations":[{"type":"rectangle","bounds":[65,40,30,20],"style":{"fill":[255,0,0,255]}}]})"))
+             .isEmpty(),
+        "create an annotation that the eyedropper must preserve");
+    const QImage decorated = canvas.grab().toImage();
+    require(decorated.pixelColor(10, 50) != image.pixelColor(10, 50),
+            "the regression fixture must visibly darken pixels outside the selection");
+    require(decorated.pixelColor(40, 50) != image.pixelColor(40, 50),
+            "the regression fixture must visibly paint the selection border");
+    ScreenshotCanvasColorSampler sampler;
+    const QRect physicalBounds(-160, 200, 160, 100);
+    require(sampler.ensureContentSnapshot(canvas, physicalBounds),
+            "capture screenshot content without selection UI");
+    for (const QPoint point : {QPoint(10, 50), QPoint(40, 50), QPoint(45, 50), QPoint(119, 50)}) {
+        const QImage preview = sampler.previewAtPhysicalPoint(physicalBounds.topLeft() + point);
+        for (int y = 0; y < preview.height(); ++y)
+            for (int x = 0; x < preview.width(); ++x)
+                require(preview.pixelColor(x, y) == image.pixelColor(point + QPoint(x - 3, y - 3)),
+                        "the entire eyedropper preview must exclude selection mask and border");
+    }
+    require(sampler.previewAtPhysicalPoint(physicalBounds.topLeft() + QPoint(80, 50))
+                    .pixelColor(3, 3) == QColor(Qt::red),
+            "sampling must retain annotations over the original screenshot");
+    require(canvas.grab().toImage() == decorated,
+            "sampling must leave the visible selection mask and border intact");
+    require(sampler.ensureSnapshot(canvas, physicalBounds) &&
+                sampler.previewAtPhysicalPoint(physicalBounds.topLeft() + QPoint(10, 50))
+                        .pixelColor(3, 3) == decorated.pixelColor(10, 50),
+            "widget sampling must not reuse a screenshot content snapshot");
+    require(sampler.ensureContentSnapshot(canvas, physicalBounds) &&
+                sampler.previewAtPhysicalPoint(physicalBounds.topLeft() + QPoint(10, 50))
+                        .pixelColor(3, 3) == image.pixelColor(10, 50),
+            "content sampling must not reuse a decorated widget snapshot");
+    require(
+        !runtime
+             .applyAnnotationTransaction(QByteArrayLiteral(
+                 R"({"version":1,"operations":[{"type":"spotlight","bounds":[70,40,20,20],"style":{"color":[0,0,255,255],"opacity":0.5,"corner_radius":0}}]})"))
+             .isEmpty(),
+        "create a Spotlight effect constrained to the screenshot selection");
+    const QImage spotlight = canvas.grab().toImage();
+    require(spotlight.pixelColor(55, 50) != image.pixelColor(55, 50),
+            "the regression fixture must visibly tint pixels inside the selection");
+    sampler.reset();
+    require(sampler.ensureContentSnapshot(canvas, physicalBounds) &&
+                sampler.previewAtPhysicalPoint(physicalBounds.topLeft() + QPoint(10, 50))
+                        .pixelColor(3, 3) == image.pixelColor(10, 50) &&
+                sampler.previewAtPhysicalPoint(physicalBounds.topLeft() + QPoint(55, 50))
+                        .pixelColor(3, 3) == spotlight.pixelColor(55, 50),
+            "sampling must preserve Spotlight's selection-relative bounds and displayed colors");
+    require(canvas.grab().toImage() == spotlight,
+            "sampling document effects must leave the visible screenshot unchanged");
+}
+
 void canvasSamplerFollowsSessionOwner() {
     QWidget overlay(nullptr, Qt::Tool | Qt::WindowStaysOnTopHint);
     QWidget canvas(&overlay);
@@ -2026,6 +2101,78 @@ void canvasSamplerFollowsSessionOwner() {
                     (!sampler.windowHandle() || !sampler.windowHandle()->transientParent()),
                 "ending sampling must hide the HUD and release its transient owner");
     }
+}
+
+void exitConfirmationStacksAbovePicker() {
+    QTemporaryDir temporary;
+    require(temporary.isValid(), "temporary exit confirmation storage available");
+    auto& storage = snow_shot::storage::ApplicationStorage::instance();
+    require(storage.initialize({temporary.path(), temporary.path(), 60000}).success,
+            "initialize isolated exit confirmation storage");
+    {
+        QWidget owner(nullptr, Qt::Tool | Qt::WindowStaysOnTopHint);
+        owner.setGeometry(50, 50, 640, 480);
+        owner.show();
+        ScreenshotColorPickerWindow picker;
+        picker.setOwnerWindow(&owner);
+        QImage image(owner.size(), QImage::Format_RGB32);
+        image.fill(Qt::red);
+        picker.setCaptureImage(image, image.rect());
+
+        snow_shot::presentation::WindowShortcutManager shortcuts;
+        shortcuts.addScopeWindow(&owner);
+        int exits = 0;
+        int restores = 0;
+        snow_shot::presentation::ScreenshotShortcutExitConfirmation confirmation(
+            shortcuts, [&] { ++exits; },
+            [&](QWidget* restoredOwner) {
+                require(restoredOwner == &owner, "cancel must restore the screenshot owner");
+                ++restores;
+            });
+        for (int cycle = 0; cycle != 3; ++cycle) {
+            picker.updatePicker(QPoint(240, 160), QPointF(240, 160), true);
+            require(picker.isVisible(), "the magnifier must be visible before confirmation");
+            require(confirmation.request(true, &owner), "open exit confirmation over magnifier");
+            auto* modal = owner.findChild<adqt::widgets::AdModal*>(
+                QStringLiteral("screenshotShortcutExitConfirmation"));
+            require(modal && modal->isOpen(), "exit confirmation must open");
+            QWidget* surface = modal->acceptButton()->window();
+            require(surface != &owner && surface->isWindow() && surface->isVisible() &&
+                        surface->windowFlags().testFlag(Qt::WindowStaysOnTopHint) &&
+                        surface->windowHandle()->transientParent() == owner.windowHandle(),
+                    "confirmation must join the screenshot owner's topmost native window stack");
+            require(modal->windowModality() == Qt::WindowModal,
+                    "confirmation must block the screenshot owner while open");
+            picker.updatePicker(QPoint(241, 161), QPointF(241, 161), true);
+            QCoreApplication::processEvents();
+#ifdef Q_OS_WIN
+            if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+                const HWND dialog = reinterpret_cast<HWND>(surface->internalWinId());
+                const HWND magnifier = reinterpret_cast<HWND>(picker.internalWinId());
+                bool dialogAboveMagnifier = false;
+                for (HWND window = GetTopWindow(nullptr); window;
+                     window = GetWindow(window, GW_HWNDNEXT)) {
+                    if (window == dialog) {
+                        dialogAboveMagnifier = true;
+                        break;
+                    }
+                    if (window == magnifier)
+                        break;
+                }
+                require(dialogAboveMagnifier,
+                        "exit confirmation must remain above the visible magnifier after updates");
+            }
+#endif
+            if (cycle == 2)
+                modal->acceptButton()->click();
+            else
+                modal->rejectButton()->click();
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            require(exits == (cycle == 2 ? 1 : 0) && restores == std::min(cycle + 1, 2),
+                    "reopening confirmation must preserve cancel and exit behavior");
+        }
+    }
+    storage.shutdown();
 }
 
 void auxiliaryWindowsPreserveOwnerStacking() {
@@ -2245,6 +2392,10 @@ void auxiliaryWindowsPreserveOwnerStacking() {
 
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
+    if (application.arguments().contains(QStringLiteral("--exit-confirmation-stacking-only"))) {
+        exitConfirmationStacksAbovePicker();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--hidden-picker-only"))) {
         hiddenPickerSamplesWithoutPreparingPresentation();
         return 0;
@@ -2291,6 +2442,7 @@ int main(int argc, char** argv) {
     }
     canvasSamplingSessionReleasesTargetsAndCommitsAfterCleanup();
     canvasSamplerFollowsSessionOwner();
+    canvasSamplerExcludesScreenshotSelectionUi();
     if (application.arguments().contains(QStringLiteral("--canvas-sampler-only")))
         return 0;
     auxiliaryWindowsPreserveOwnerStacking();

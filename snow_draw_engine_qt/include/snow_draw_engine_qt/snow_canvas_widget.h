@@ -83,6 +83,11 @@ class SnowCanvasWidget : public QWidget {
         const SnowCanvasAngleStyle& style,
         quint32 properties = static_cast<quint32>(SnowCanvasAngleStyleProperty::All));
     bool setCanvasAngleStylePatch(const SnowCanvasAngleStyle& style, quint32 properties);
+    SnowCanvasBracketStyle canvasBracketStyle() const;
+    bool setCanvasBracketStyle(
+        const SnowCanvasBracketStyle& style,
+        quint32 properties = static_cast<quint32>(SnowCanvasBracketStyleProperty::All));
+    bool setCanvasBracketStylePatch(const SnowCanvasBracketStyle& style, quint32 properties);
     // Adjusts the third-point preview, otherwise an angle-only selection, in radians.
     bool adjustAngleValue(double deltaRadians);
     // Factor-wheel ownership follows the active tool or selection, including in host routers.
@@ -210,6 +215,9 @@ class SnowCanvasWidget : public QWidget {
     // Repaint changed original pixels and magnifier destinations that sample them.
     void updateBaseImageContent(const QRegion& damage);
     [[nodiscard]] QTransform canvasToViewTransform() const;
+    // Paint the current viewport at physicalSize without editor overlays. Hosts receive
+    // ContentSnapshot so they can omit presentation-only selection masks and borders.
+    [[nodiscard]] QImage renderContentToImage(const QSize& physicalSize);
     QRect viewRectForCanvasRect(const QRectF& canvasRect, int paddingPx = 0) const;
 
   public slots:

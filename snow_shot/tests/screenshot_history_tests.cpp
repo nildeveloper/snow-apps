@@ -2643,6 +2643,8 @@ void completionGesturesUseSharedEligibilityAcrossTools() {
         {QStringLiteral("save"), QStringLiteral("save_as_file")},
         {QStringLiteral("quick_save"), QStringLiteral("quick_save")},
         {QStringLiteral("pin"), QStringLiteral("pin_to_screen")},
+        {QStringLiteral("ocr"), QStringLiteral("text_recognition")},
+        {QStringLiteral("ocr_copy"), QStringLiteral("text_recognition_copy")},
         {QStringLiteral("none"), QString()},
     };
     for (const auto& [setting, command] : commands) {
@@ -2709,6 +2711,37 @@ void completionGesturesUseSharedEligibilityAcrossTools() {
                 handler.setExternalDragActive(false);
             }
         }
+        dispatched.clear();
+        interaction.enterOverlayVisible(true);
+        handler.handleUnhandledLeftDoubleClick();
+        handler.handleUnhandledMiddleClick();
+        require(dispatched.isEmpty(),
+                "every mouse action requires a confirmed screenshot selection");
+        interaction.confirmSelection();
+        interaction.setCanvasTool(ScreenshotActiveTool::Ocr);
+        require(interaction.enterSelectionDrag(ScreenshotSelectionDragMode::All),
+                "begin a selection drag before testing mouse action eligibility");
+        handler.handleUnhandledLeftDoubleClick();
+        handler.handleUnhandledMiddleClick();
+        require(dispatched.isEmpty(), "mouse actions must defer to unfinished selection drags");
+        interaction.finishDrag();
+        interaction.confirmSelection();
+        selection.setRegionType(ScreenshotRegionType::Polyline);
+        selection.beginRegionOperation(ScreenshotSelectionModel::RegionOperation::Add);
+        handler.handleUnhandledLeftDoubleClick();
+        handler.handleUnhandledMiddleClick();
+        require(dispatched.isEmpty(), "mouse actions must defer to region construction");
+        selection.cancelRegionOperation();
+        handler.handleUnhandledLeftDoubleClick();
+        handler.handleUnhandledMiddleClick();
+        require(dispatched == (command.isEmpty() ? QStringList{} : QStringList{command, command}),
+                "each mouse action must resume after region construction ends");
+        dispatched.clear();
+        selection.clearSelection();
+        handler.handleUnhandledLeftDoubleClick();
+        handler.handleUnhandledMiddleClick();
+        require(dispatched.isEmpty(), "mouse actions require a nonempty screenshot selection");
+        selection.setSelectionRect(QRectF(1, 2, 20, 21));
     }
 
     require(settings.setDoubleClickAction(QStringLiteral("copy")) &&
@@ -4442,11 +4475,7 @@ void shortcutExitConfirmationGatesCancellation() {
     auto* modal = owner.findChild<adqt::widgets::AdModal*>(
         QStringLiteral("screenshotShortcutExitConfirmation"));
     require(modal != nullptr && modal->ownerWindow() == &owner &&
-#ifdef Q_OS_MACOS
                 modal->mode() == adqt::widgets::AdModal::Mode::Window &&
-#else
-                modal->mode() == adqt::widgets::AdModal::Mode::Overlay &&
-#endif
                 modal->windowTitle() == QStringLiteral("Exit screenshot?") &&
                 modal->text() == QStringLiteral("Your current screenshot will be discarded.") &&
                 modal->acceptButton() != nullptr &&
@@ -4455,11 +4484,9 @@ void shortcutExitConfirmationGatesCancellation() {
                 modal->rejectButton() != nullptr &&
                 modal->rejectButton()->text() == QStringLiteral("Cancel") && exits == 0,
             "enabled confirmation must show the configured destructive modal on its owner");
-#ifdef Q_OS_MACOS
     require(modal->acceptButton()->window()->isWindow() &&
                 modal->acceptButton()->window() != &owner,
-            "macOS confirmation must use a native window that can cover floating toolbars");
-#endif
+            "confirmation must use a native window that can cover floating screenshot tools");
     require(confirmation.request(true, &owner) &&
                 owner.findChildren<adqt::widgets::AdModal*>(
                          QStringLiteral("screenshotShortcutExitConfirmation"))

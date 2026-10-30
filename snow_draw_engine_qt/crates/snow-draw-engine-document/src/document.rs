@@ -739,6 +739,7 @@ pub enum HighlightShape {
     Rectangle,
     Ellipse,
     Diamond,
+    ThoughtBubble,
 }
 
 impl RectangleData {
@@ -776,7 +777,11 @@ impl RectangleData {
     }
 
     pub fn supports_corner_radius(&self) -> bool {
-        !self.is_highlight() && self.highlight_shape != HighlightShape::Ellipse
+        !self.is_highlight()
+            && !matches!(
+                self.highlight_shape,
+                HighlightShape::Ellipse | HighlightShape::ThoughtBubble
+            )
     }
 
     pub fn element_kind(&self) -> ElementKind {
@@ -1007,7 +1012,7 @@ impl ElementData {
                 filter.x + filter.width,
                 filter.y + filter.height,
             ),
-            Self::Arrow(arrow) if arrow.is_angle() => {
+            Self::Arrow(arrow) if arrow.is_angle() || arrow.is_bracket() => {
                 let bounds = arrow_bounds(arrow);
                 let half_stroke = arrow.stroke_width.max(0.0) / 2.0;
                 DrawRect::new(
@@ -1092,6 +1097,7 @@ pub enum ElementKind {
     Distance,
     Angle,
     SpeechBubble,
+    Bracket,
 }
 
 impl ElementKind {
@@ -1110,7 +1116,8 @@ impl ElementKind {
             | Self::SerialNumber
             | Self::Spotlight
             | Self::Distance
-            | Self::Angle => false,
+            | Self::Angle
+            | Self::Bracket => false,
             Self::SpeechBubble => false,
         }
     }

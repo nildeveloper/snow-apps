@@ -95,6 +95,7 @@
 #include <future>
 #include <thread>
 #ifdef Q_OS_WIN
+#include "snow_shot/platform/windows/windowalwaysontop.h"
 #include <qt_windows.h>
 #endif
 
@@ -107,6 +108,7 @@ const QString kPinShadowColorKey = QStringLiteral("pin_to_screen/shadow_color");
 const QString kPinShadowActiveColorKey = QStringLiteral("pin_to_screen/shadow_active_color");
 const QString kPinLockedShadowColorKey = QStringLiteral("pin_to_screen/locked_shadow_color");
 const QString kTrayEnabledKey = QStringLiteral("tray/enabled");
+const QString kTrayUseSystemIconColorKey = QStringLiteral("tray/use_system_icon_color");
 const QString kTrayIconKey = QStringLiteral("tray/icon");
 const QString kTrayCustomIconKey = QStringLiteral("tray/custom_icon");
 const QString kTrayDarkIconKey = QStringLiteral("tray/dark_icon");
@@ -528,6 +530,8 @@ class ApplicationController::Impl {
         applyRuntimeConfiguration(configuration.value(kPinLockedShadowColorKey),
                                   kPinLockedShadowColorKey);
         applyRuntimeConfiguration(configuration.value(kTrayEnabledKey), kTrayEnabledKey);
+        applyRuntimeConfiguration(configuration.value(kTrayUseSystemIconColorKey),
+                                  kTrayUseSystemIconColorKey);
         applyRuntimeConfiguration(configuration.value(kTrayIconKey), kTrayIconKey);
         applyRuntimeConfiguration(configuration.value(kTrayCustomIconKey), kTrayCustomIconKey);
         applyRuntimeConfiguration(configuration.value(kTrayDarkIconKey), kTrayDarkIconKey);
@@ -781,7 +785,9 @@ class ApplicationController::Impl {
              configuration.value(QStringLiteral("text_recognition/resident_process")).toBool(),
              configuration.value(QStringLiteral("text_recognition/model_hot_start")).toBool(),
              screenshotOcrTextDetectionProcessingFromValue(
-                 configuration.value(kOcrTextDetectionProcessingKey).toString())});
+                 configuration.value(kOcrTextDetectionProcessingKey).toString()),
+             configuration.value(QStringLiteral("text_recognition/hardware_acceleration"))
+                 .toBool()});
     }
 
     void startMcp() {
@@ -1648,6 +1654,8 @@ class ApplicationController::Impl {
             const bool enabled = value.isBool() ? value.toBool() : true;
             systemTray.setEnabled(enabled);
             ScreenshotPinnedWindow::setRuntimeTrayEnabled(enabled);
+        } else if (key == kTrayUseSystemIconColorKey) {
+            systemTray.setUseSystemIconColor(value.toBool(false));
         } else if (key == kTrayIconKey) {
             systemTray.setIconSelection(value.toString(QStringLiteral("default")));
         } else if (key == kTrayCustomIconKey) {
@@ -1671,7 +1679,8 @@ class ApplicationController::Impl {
         } else if (key == kOcrModelTypeKey || key == kOcrDetectorResizePolicyKey ||
                    key == kOcrTextDetectionProcessingKey ||
                    key == QStringLiteral("text_recognition/resident_process") ||
-                   key == QStringLiteral("text_recognition/model_hot_start")) {
+                   key == QStringLiteral("text_recognition/model_hot_start") ||
+                   key == QStringLiteral("text_recognition/hardware_acceleration")) {
             if (started)
                 applyOcrConfiguration();
         }
@@ -1975,6 +1984,12 @@ class ApplicationController::Impl {
             }
 #endif
             break;
+        case presentation::GlobalShortcutAction::ToggleWindowUnderCursorAlwaysOnTop:
+#ifdef Q_OS_WIN
+            static_cast<void>(platform::windows::toggleWindowUnderCursorAlwaysOnTop(
+                &ScreenshotPinnedWindow::toggleAlwaysOnTopForSurface));
+#endif
+            break;
         case presentation::GlobalShortcutAction::PinSelectedFiles: {
             const auto target = platform::createSelectedFileBackend()->captureTarget();
             if (ScreenshotController* controller = ensureScreenshotController()) {
@@ -2012,6 +2027,12 @@ class ApplicationController::Impl {
         if (!imageEditingWindowCoordinator) {
             presentation::ImageEditingServices services;
             services.pins = &groupManager;
+            services.pin = [this](QImage image, auto completion) {
+                ScreenshotClipboardContent content;
+                content.image = std::move(image);
+                return ensureScreenshotController()->mcpPinContent(std::move(content),
+                                                                   std::move(completion));
+            };
             services.providers = [this] {
                 return ScreenshotPinnedRecognitionProviders{
                     ocrRecognition.get(), ensureScreenshotController()->mcpQrRecognition(),
