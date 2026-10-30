@@ -1511,6 +1511,44 @@ if name == 'openssl':
                          and '--build' not in call)
         self.assertIn(f'Qt6_DIR={static_qt}', configure)
 
+    def test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging(self):
+        workflow = (ROOT / '.github/workflows/macos13-compat-release.yml').read_text()
+        step = workflow.split('      - name: Build Snow Shot with compiler caches\n', 1)[1]
+        body = step.split('        run: |\n', 1)[1].split('\n      - name:', 1)[0]
+        body = '\n'.join(line[10:] for line in body.splitlines())
+        for key, value in (('matrix.arch', 'arm64'),
+                           ('matrix.preset', 'snow-shot-macos-arm64-release'),
+                           ('matrix.parallel', '3')):
+            body = body.replace('${{ ' + key + ' }}', value)
+        ccache = self.bin / 'ccache'
+        ccache.write_text('#!/bin/bash\nexit 0\n')
+        ccache.chmod(0o755)
+        external = self.root / '.cache/macos13-compile/arm64'
+        compiled = external / 'cargo-target/retained.rlib'
+        compiled.parent.mkdir(parents=True)
+        compiled.write_bytes(b'reuse this output')
+        stale = self.root / 'build/snow-shot-macos-arm64-release/stale-output'
+        stale.parent.mkdir(parents=True)
+        stale.touch()
+        self.env['SNOW_COMPILE_CACHE_ROOT'] = str(external)
+        result = subprocess.run(['/bin/bash', '-c', body], cwd=self.root,
+                                env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(stale.exists())
+        self.assertEqual(compiled.read_bytes(), b'reuse this output')
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        configure = next(call for call in calls if call[0] == 'cmake'
+                         and '--preset' in call and '--build' not in call)
+        self.assertIn(f'-DSNOW_RUST_CARGO_TARGET_DIR:PATH={external}/cargo-target', configure)
+        for language in ('C', 'CXX', 'OBJCXX'):
+            self.assertIn(f'-DCMAKE_{language}_COMPILER_LAUNCHER=ccache', configure)
+        self.assertIn('-DCMAKE_CXX_FLAGS:STRING=-Xclang -fno-pch-timestamp', configure)
+        self.log.unlink()
+        calls = self.run_script('package-snow-shot.sh', 'snow-shot-macos-arm64-release',
+                                '--skip-build')
+        self.assertFalse(any('--build' in call for call in calls))
+        self.assertEqual(sum(call[0] == 'cpack' for call in calls), 2)
+
     def test_package_builds_before_cpack(self):
         stale = self.root / 'build/snow-shot-macos-arm64-release/stale-bundle-file'
         stale.parent.mkdir(parents=True)

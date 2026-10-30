@@ -9,7 +9,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: macos13-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  scripts:
+    name: Build script regression checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Check compilation cache transport
+        run: python3 scripts/test-macos13-compile-cache.py -v
+      - name: Check macOS compatibility policy
+        run: >-
+          python3 scripts/test-macos-build-support.py QtMacOSDeploymentPolicy
+          MacOSBuildScripts.test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging -v
+
   jthread:
     name: jthread preflight ${{ matrix.name }}
     strategy:

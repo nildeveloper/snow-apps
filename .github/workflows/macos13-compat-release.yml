@@ -2,10 +2,9 @@ name: macOS 13 Compatibility Release
 
 on:
   push:
-    branches:
-      - feature/macos13-compat
     tags:
       - "macos13-v*-r*"
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -66,7 +65,7 @@ jobs:
             revision=smoke
             release_tag=
             publish=false
-            echo "Running full macOS 13 compatibility smoke build; release publishing is disabled."
+            echo "Running a manual full compatibility build; release publishing is disabled."
           fi
 
           if ! grep -Fq 'set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0"' CMakeLists.txt; then
@@ -107,6 +106,14 @@ jobs:
             parallel: 4
     runs-on: ${{ matrix.runner }}
     env:
+      SNOW_COMPILE_CACHE_ROOT: ${{ github.workspace }}/.cache/macos13-compile/${{ matrix.arch }}
+      CARGO_HOME: ${{ github.workspace }}/.cache/macos13-compile/${{ matrix.arch }}/cargo-home
+      CCACHE_DIR: ${{ github.workspace }}/.cache/macos13-compile/${{ matrix.arch }}/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+      # Required by ccache for Clang PCH; paired with -fno-pch-timestamp below.
+      CCACHE_SLOPPINESS: pch_defines,time_macros
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
       SNOW_QT_PREFIX: ${{ github.workspace }}/.cache/qt-static/${{ matrix.arch }}
@@ -126,7 +133,7 @@ jobs:
           # Keep the Apple compiler toolchain intact. Installing Homebrew's full
           # LLVM and adding it to PATH can make GN invoke a different clang++
           # than vcpkg/CMake used to emit LTO bitcode.
-          brew install cmake ninja pkgconf nasm clang-format
+          brew install cmake ninja pkgconf nasm clang-format ccache zstd
 
           apple_clang="$(xcrun --find clang)"
           apple_clangxx="$(xcrun --find clang++)"
@@ -140,6 +147,29 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare Metal shader compiler for Apple Silicon OCR
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! xcrun metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun metal --version
+
+      - name: Apply Metal translator compatibility patch
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Xcode 16's metal-tt rejects the optional resource packing flags.
+          # Keep native archives and outer deflate compression enabled.
+          # Fail if the pinned upstream source no longer matches the patch.
+          patch="${GITHUB_WORKSPACE}/cmake/ocr/macos13-metal-tt.patch"
+          ocr="${GITHUB_WORKSPACE}/snow-crates/crates/simd-paddle-ocr-rs"
+          git -C "${ocr}" apply --check "${patch}"
+          git -C "${ocr}" apply "${patch}"
+
       - name: Select Rust toolchain
         shell: bash
         run: |
@@ -149,15 +179,35 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Restore Cargo cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: macos13-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            macos13-${{ matrix.arch }}-cargo-
+      - name: Resolve compilation cache identity
+        id: compile-cache-key
+        shell: bash
+        env:
+          DEPENDENCY_HASH: ${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', 'scripts/build-toolchain.json', 'scripts/qt-toolchain.json', 'CMakePresets.json', 'vcpkg*.json', 'cmake/ocr/**', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/**', 'cmake/RustStaticLibrary.cmake', 'snow_shot/CMakeLists.txt', 'scripts/macos13-compile-cache.sh') }}
+        run: |
+          set -euo pipefail
+          fingerprint="$(
+            {
+              printf '%s\n' "${{ matrix.arch }}" "${{ matrix.preset }}" "${DEPENDENCY_HASH}" 'macos13-compile-v1'
+              xcrun clang --version
+              xcrun clang++ --version
+              xcodebuild -version
+              xcrun --sdk macosx --show-sdk-version
+              xcrun --sdk macosx --show-sdk-path
+              rustc -vV
+              cmake --version
+              ccache --version
+              if [[ "${{ matrix.arch }}" == arm64 ]]; then xcrun metal --version; fi
+            } | shasum -a 256 | awk '{print $1}'
+          )"
+          echo "artifact_name=macos13-compile-${{ matrix.arch }}-${fingerprint}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore cross-tag compilation cache
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPILE_CACHE_ARTIFACT: ${{ steps.compile-cache-key.outputs.artifact_name }}
+        run: bash scripts/macos13-compile-cache.sh restore
 
       - name: Prefetch Rust packaging dependencies
         shell: bash
@@ -424,12 +474,57 @@ jobs:
           QT_CACHE_ARTIFACT: ${{ steps.qt-cache-key.outputs.artifact_name }}
         run: rm -f "${RUNNER_TEMP}/${QT_CACHE_ARTIFACT}.tar.gz"
 
-      - name: Build and package Snow Shot
+      - name: Build Snow Shot with compiler caches
+        id: native-build
         shell: bash
         run: |
           set -euo pipefail
-          export SNOW_QT_STATIC_DIR
-          scripts/package-snow-shot.sh "${{ matrix.preset }}" --parallel "${{ matrix.parallel }}"
+          ccache --zero-stats
+          targets=(--target snow_shot)
+          if [[ "${{ matrix.arch }}" == arm64 ]]; then targets+=(--target snow_shot_mini); fi
+          # A fresh CMake tree keeps release configuration reproducible. Cargo
+          # and ccache live outside it, so --clean cannot discard their outputs.
+          scripts/build.sh "${{ matrix.preset }}" --clean --skip-bootstrap \
+            "${targets[@]}" --parallel "${{ matrix.parallel }}" -- \
+            "-DSNOW_RUST_CARGO_TARGET_DIR:PATH=${SNOW_COMPILE_CACHE_ROOT}/cargo-target" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
+            "-DCMAKE_CXX_FLAGS:STRING=-Xclang -fno-pch-timestamp" \
+            "-DCMAKE_OBJCXX_FLAGS:STRING=-Xclang -fno-pch-timestamp"
+
+      - name: Package existing release binaries
+        shell: bash
+        run: scripts/package-snow-shot.sh "${{ matrix.preset }}" --skip-build
+
+      - name: Report compiler cache statistics
+        if: ${{ !cancelled() && (steps.native-build.outcome == 'success' || steps.native-build.outcome == 'failure') }}
+        run: ccache --show-stats
+
+      - name: Pack compilation cache for the next revision
+        id: pack-compile-cache
+        if: ${{ !cancelled() && (steps.native-build.outcome == 'success' || steps.native-build.outcome == 'failure') }}
+        shell: bash
+        env:
+          COMPILE_CACHE_ARTIFACT: ${{ steps.compile-cache-key.outputs.artifact_name }}
+        run: bash scripts/macos13-compile-cache.sh pack
+
+      - name: Publish cross-tag compilation cache
+        if: ${{ !cancelled() && steps.pack-compile-cache.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.compile-cache-key.outputs.artifact_name }}
+          path: ${{ runner.temp }}/${{ steps.compile-cache-key.outputs.artifact_name }}.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Remove packed compilation cache
+        if: ${{ !cancelled() && steps.pack-compile-cache.outcome == 'success' }}
+        shell: bash
+        env:
+          COMPILE_CACHE_ARTIFACT: ${{ steps.compile-cache-key.outputs.artifact_name }}
+        run: rm -f "${RUNNER_TEMP}/${COMPILE_CACHE_ARTIFACT}.tar.zst"
 
       - name: Collect and verify release assets
         shell: bash
