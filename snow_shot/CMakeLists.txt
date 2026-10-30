@@ -1269,7 +1269,8 @@ add_library(snow_shot_collage STATIC
     src/presentation/collage/collagepdfsettingswidget.cpp
     src/presentation/collage/collagepdfexport.cpp)
 target_include_directories(snow_shot_collage PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/image")
-target_link_libraries(snow_shot_collage PUBLIC snow_shot_collage_core snow_shot_settings)
+target_link_libraries(snow_shot_collage PUBLIC snow_shot_collage_core snow_shot_settings
+    snow_shot_image_split_core)
 
 add_library(snow_shot_image_split_core STATIC
     include/snow_shot/presentation/imagesplitdocument.h
@@ -1603,6 +1604,21 @@ if(SNOW_SHOT_BUILD_TESTS)
     snow_shot_add_translations(snow-shot-image-paste-tests)
     add_test(NAME snow-shot-image-paste-tests COMMAND snow-shot-image-paste-tests -platform offscreen)
     set_tests_properties(snow-shot-image-paste-tests PROPERTIES LABELS unit
+        ENVIRONMENT "${_SNOW_SHOT_IMAGE_SPLIT_QPA_ENVIRONMENT}"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
+    add_executable(snow-shot-image-split-pdf-handoff-tests tests/imagesplit_pdf_handoff_tests.cpp
+        ${SNOW_SHOT_COLLAGE_EXPORT_TEST_SOURCES})
+    target_include_directories(snow-shot-image-split-pdf-handoff-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/image"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/services")
+    target_link_libraries(snow-shot-image-split-pdf-handoff-tests PRIVATE
+        snow_shot_image_split snow_shot_collage snow_shot_diagnostics)
+    snow_shot_import_offscreen_platform(snow-shot-image-split-pdf-handoff-tests)
+    snow_shot_add_translations(snow-shot-image-split-pdf-handoff-tests)
+    add_test(NAME snow-shot-image-split-pdf-handoff-tests
+        COMMAND snow-shot-image-split-pdf-handoff-tests -platform offscreen)
+    set_tests_properties(snow-shot-image-split-pdf-handoff-tests PROPERTIES LABELS unit
         ENVIRONMENT "${_SNOW_SHOT_IMAGE_SPLIT_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
@@ -5296,6 +5312,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         LABELS "interactive;e2e;windows" RUN_SERIAL TRUE
         ENVIRONMENT "QT_QPA_PLATFORM=windows")
     snow_shot_import_offscreen_platform(snow-shot-pinned-window-tests)
+    snow_shot_add_translations(snow-shot-pinned-window-tests)
     add_test(NAME snow-shot-image-editing-tests
         COMMAND snow-shot-pinned-window-tests --image-editing-only -platform offscreen)
     add_test(NAME snow-shot-image-editing-spreadsheet-open-tests
@@ -8201,6 +8218,10 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-border-fill-icon-tests
         COMMAND snow-shot-generated-icon-pack-tests --border-fill-only -platform offscreen)
     set_tests_properties(snow-shot-border-fill-icon-tests PROPERTIES TIMEOUT 30 LABELS unit)
+    add_test(NAME snow-shot-live-window-status-icon-tests
+        COMMAND snow-shot-generated-icon-pack-tests --live-window-status-only -platform offscreen)
+    set_tests_properties(snow-shot-live-window-status-icon-tests PROPERTIES TIMEOUT 30 LABELS unit
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     add_test(NAME snow-shot-reveal-icon-tests
         COMMAND snow-shot-generated-icon-pack-tests --reveal-only -platform offscreen)
     set_tests_properties(snow-shot-reveal-icon-tests PROPERTIES TIMEOUT 30 LABELS unit
@@ -8395,6 +8416,12 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
     )
+    add_test(NAME snow-shot-toolbar-tooltip-tests
+        COMMAND snow-shot-toolbar-main-panel-tests --tooltips-only -platform offscreen)
+    set_tests_properties(snow-shot-toolbar-tooltip-tests PROPERTIES
+        LABELS "unit" SNOW_TEST_CROSS_PLATFORM TRUE TIMEOUT 60
+        ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     add_test(NAME snow-shot-speech-bubble-toolbar-tests
         COMMAND snow-shot-toolbar-main-panel-tests --speech-bubble-only -platform offscreen)
     add_test(NAME snow-shot-recording-audio-icon-tests
@@ -10178,8 +10205,18 @@ if(WIN32 AND SNOW_SHOT_BUILD_BENCHMARKS)
     # file-pin batch snapshot/decode/presentation pipeline with real pinned
     # windows and reports hardware-sensitive medians for explicit Release
     # sessions.
+    add_executable(snow-shot-shell-launch-performance-benchmark
+        tests/shell_image_launch_performance_benchmark.cpp
+        include/snow_shot/app/singleinstancecoordinator.h
+        src/app/singleinstancecoordinator.cpp)
+    target_include_directories(snow-shot-shell-launch-performance-benchmark PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(snow-shot-shell-launch-performance-benchmark PRIVATE
+        snow_shot_distribution Qt6::Core Qt6::Network)
+
     add_executable(snow-shot-file-pin-batch-performance-benchmark
         src/presentation/services/pinnedtextstylecapture.cpp
+        src/presentation/imageediting/imageeditingsource.cpp
         tests/screenshot_file_pin_batch_performance_benchmark.cpp
         tests/screenshot_pinned_lifecycle_performance_benchmark.cpp
         src/presentation/pinned/screenshotpinnedclickthroughgeometry.cpp
@@ -11399,6 +11436,12 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screenshot-controller-clipboard-tests PROPERTIES
         LABELS unit SNOW_TEST_CROSS_PLATFORM TRUE TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
+    if(WIN32)
+        add_test(NAME snow-shot-shell-file-startup-tests COMMAND snow_shot --shell-file-startup-tests)
+        set_tests_properties(snow-shot-shell-file-startup-tests PROPERTIES
+            LABELS unit TIMEOUT 60 RUN_SERIAL TRUE
+            ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
+    endif()
     add_test(NAME snow-shot-image-editing-pin-controller-tests
         COMMAND snow_shot --image-editor-pin-tests)
     set_tests_properties(snow-shot-image-editing-pin-controller-tests PROPERTIES
@@ -11511,6 +11554,11 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-decoded-content-presentation-tests
         COMMAND snow-shot-pinned-window-tests --decoded-content-only -platform offscreen)
     set_tests_properties(snow-shot-decoded-content-presentation-tests PROPERTIES
+        LABELS unit SNOW_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60
+        ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
+    add_test(NAME snow-shot-shell-file-annotation-tests
+        COMMAND snow-shot-pinned-window-tests --shell-file-annotation-only -platform offscreen)
+    set_tests_properties(snow-shot-shell-file-annotation-tests PROPERTIES
         LABELS unit SNOW_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
     add_test(NAME snow-shot-pinned-color-space-tests
@@ -13184,6 +13232,18 @@ if(TARGET snow-shot-pinned-window-tests)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
+if(SNOW_APPS_BUILD_BENCHMARKS)
+    add_executable(snow-shot-live-window-frame-rendering-performance-benchmark
+        tests/live_window_frame_rendering_tests.cpp)
+    target_compile_definitions(snow-shot-live-window-frame-rendering-performance-benchmark PRIVATE
+        SNOW_SHOT_LIVE_FRAME_BENCHMARK=1)
+    target_link_libraries(snow-shot-live-window-frame-rendering-performance-benchmark PRIVATE Qt6::Gui)
+    add_test(NAME snow-shot-live-window-frame-rendering-performance-benchmark
+        COMMAND snow-shot-live-window-frame-rendering-performance-benchmark)
+    set_tests_properties(snow-shot-live-window-frame-rendering-performance-benchmark PROPERTIES
+        LABELS benchmark RUN_SERIAL TRUE TIMEOUT 60)
+endif()
+
 if(SNOW_APPS_BUILD_BENCHMARKS AND TARGET snow-shot-pinned-window-tests)
     get_target_property(_image_editing_benchmark_sources snow-shot-pinned-window-tests SOURCES)
     list(FILTER _image_editing_benchmark_sources EXCLUDE REGEX "(^|[/\\])tests[/\\]")
@@ -13254,13 +13314,16 @@ target_link_libraries(snow_shot_live_window PUBLIC Qt6::Widgets PRIVATE Qt6::Con
 if(WIN32)
     target_sources(snow_shot_live_window PRIVATE
         src/platform/windows/livewindownative.cpp
+        src/platform/windows/livewindowinputrouting.h
         src/platform/windows/livewindowpresentation.cpp
         src/platform/windows/livewindowpresentation.h)
     target_link_libraries(snow_shot_live_window PRIVATE dwmapi user32 gdi32 uxtheme comctl32)
 elseif(APPLE)
-    target_sources(snow_shot_live_window PRIVATE src/platform/macos/livewindownative.mm)
+    target_sources(snow_shot_live_window PRIVATE src/platform/macos/livewindownative.mm
+        src/platform/macos/livewindowcapture.cpp src/platform/macos/livewindowpresentation.mm)
     target_link_libraries(snow_shot_live_window PRIVATE "-framework AppKit"
-        "-framework ApplicationServices")
+        "-framework ApplicationServices" "-framework QuartzCore" "-framework CoreVideo"
+        "-framework IOSurface")
 endif()
 snow_shot_register_source_capability(live_window
     FULL_TARGET snow_shot_live_window MINI_TARGET snow_shot_live_window)
@@ -13284,6 +13347,14 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-live-window-source-tests PROPERTIES
         LABELS "unit" TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     if(WIN32)
+        add_executable(snow-shot-live-window-input-routing-tests
+            tests/live_window_input_routing_tests.cpp)
+        target_include_directories(snow-shot-live-window-input-routing-tests PRIVATE src)
+        target_link_libraries(snow-shot-live-window-input-routing-tests PRIVATE Qt6::Core user32)
+        add_test(NAME snow-shot-live-window-input-routing-tests
+            COMMAND snow-shot-live-window-input-routing-tests)
+        set_tests_properties(snow-shot-live-window-input-routing-tests PROPERTIES
+            LABELS "unit;windows" TIMEOUT 30)
         add_executable(snow-shot-live-window-native-tests tests/live_window_native_tests.cpp)
         target_link_libraries(snow-shot-live-window-native-tests PRIVATE snow_shot_live_window)
         add_test(NAME snow-shot-live-window-native-tests COMMAND snow-shot-live-window-native-tests)
@@ -13291,6 +13362,15 @@ if(SNOW_SHOT_BUILD_TESTS)
             LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 90
             ENVIRONMENT "QT_QPA_PLATFORM=windows")
     elseif(APPLE)
+        add_executable(snow-shot-macos-live-window-capture-tests
+            tests/macos_live_window_capture_tests.cpp src/platform/macos/livewindowcapture.cpp)
+        target_include_directories(snow-shot-macos-live-window-capture-tests PRIVATE include
+            ../snow-crates/crates/snow-capture-c/include)
+        target_link_libraries(snow-shot-macos-live-window-capture-tests PRIVATE Qt6::Gui)
+        add_test(NAME snow-shot-macos-live-window-capture-tests
+            COMMAND snow-shot-macos-live-window-capture-tests)
+        set_tests_properties(snow-shot-macos-live-window-capture-tests PROPERTIES
+            LABELS "unit;macos" TIMEOUT 30)
         add_executable(snow-shot-macos-live-window-native-tests
             tests/macos_live_window_native_tests.mm)
         set_target_properties(snow-shot-macos-live-window-native-tests PROPERTIES
@@ -13310,12 +13390,28 @@ if(SNOW_SHOT_BUILD_TESTS)
         set_tests_properties(snow-shot-macos-live-window-native-tests PROPERTIES
             LABELS "interactive;macos" RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 180
             ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+        if(SNOW_APPS_BUILD_BENCHMARKS)
+            target_compile_definitions(snow-shot-macos-live-window-native-tests PRIVATE
+                SNOW_SHOT_MACOS_LIVE_WINDOW_BENCHMARK=1)
+            add_test(NAME snow-shot-macos-live-window-performance-benchmark
+                COMMAND snow-shot-macos-live-window-native-tests --performance -platform cocoa)
+            set_tests_properties(snow-shot-macos-live-window-performance-benchmark PROPERTIES
+                LABELS "benchmark;macos" RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 180
+                ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+        endif()
     endif()
     add_executable(snow-shot-live-window-geometry-tests tests/live_window_geometry_tests.cpp)
     target_include_directories(snow-shot-live-window-geometry-tests PRIVATE include)
     target_link_libraries(snow-shot-live-window-geometry-tests PRIVATE Qt6::Gui)
     add_test(NAME snow-shot-live-window-geometry-tests COMMAND snow-shot-live-window-geometry-tests)
     set_tests_properties(snow-shot-live-window-geometry-tests PROPERTIES LABELS unit TIMEOUT 30)
+
+    add_executable(snow-shot-live-window-frame-rendering-tests
+        tests/live_window_frame_rendering_tests.cpp)
+    target_link_libraries(snow-shot-live-window-frame-rendering-tests PRIVATE Qt6::Gui)
+    add_test(NAME snow-shot-live-window-frame-rendering-tests
+        COMMAND snow-shot-live-window-frame-rendering-tests)
+    set_tests_properties(snow-shot-live-window-frame-rendering-tests PROPERTIES LABELS unit TIMEOUT 30)
     if(TARGET snow-shot-toolbar-main-panel-tests)
         add_test(NAME snow-shot-live-window-toolbar-tests
             COMMAND snow-shot-toolbar-main-panel-tests --live-window-pin-only -platform offscreen)
@@ -13327,12 +13423,58 @@ if(SNOW_SHOT_BUILD_TESTS)
             COMMAND snow-shot-pinned-window-tests --live-window-pin-only -platform offscreen)
         set_tests_properties(snow-shot-live-window-pin-tests PROPERTIES LABELS unit TIMEOUT 120
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen" RESOURCE_LOCK snow-shot-system-clipboard)
+        add_test(NAME snow-shot-live-window-status-tests
+            COMMAND snow-shot-pinned-window-tests --live-window-status-only -platform offscreen)
+        set_tests_properties(snow-shot-live-window-status-tests PROPERTIES LABELS unit TIMEOUT 30
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        add_test(NAME snow-shot-live-window-status-fractional-dpi-tests
+            COMMAND snow-shot-pinned-window-tests --live-window-status-only -platform offscreen)
+        set_tests_properties(snow-shot-live-window-status-fractional-dpi-tests PROPERTIES
+            LABELS unit TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1.5")
+        if(APPLE)
+            target_sources(snow-shot-pinned-window-tests PRIVATE
+                tests/macos_live_pinned_window_tests.mm)
+            add_test(NAME snow-shot-macos-live-window-pin-native-tests
+                COMMAND snow-shot-pinned-window-tests --live-window-native-shell-only -platform cocoa)
+            set_tests_properties(snow-shot-macos-live-window-pin-native-tests PROPERTIES
+                LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 90 SKIP_RETURN_CODE 77)
+        endif()
         if(WIN32)
+            set_property(TEST snow-shot-live-window-pin-tests snow-shot-live-window-status-tests
+                snow-shot-live-window-status-fractional-dpi-tests APPEND PROPERTY
+                ENVIRONMENT "QT_QPA_FONTDIR=$ENV{SystemRoot}/Fonts")
+            add_test(NAME snow-shot-live-window-pin-hover-native-tests
+                COMMAND snow-shot-pinned-window-tests --live-window-hover-native-only
+                    -platform windows)
+            set_tests_properties(snow-shot-live-window-pin-hover-native-tests PROPERTIES
+                LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 90
+                ENVIRONMENT "QT_QPA_PLATFORM=windows")
+            foreach(_hover_variant IN ITEMS tooltip locked locked-tooltip)
+                set(_hover_arguments)
+                if(_hover_variant MATCHES "locked")
+                    list(APPEND _hover_arguments --hover-locked)
+                endif()
+                if(_hover_variant MATCHES "tooltip")
+                    list(APPEND _hover_arguments --hover-tooltip)
+                endif()
+                add_test(NAME snow-shot-live-window-pin-hover-${_hover_variant}-native-tests
+                    COMMAND snow-shot-pinned-window-tests --live-window-hover-native-only
+                        ${_hover_arguments} -platform windows)
+                set_tests_properties(snow-shot-live-window-pin-hover-${_hover_variant}-native-tests
+                    PROPERTIES LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 90
+                    ENVIRONMENT "QT_QPA_PLATFORM=windows")
+            endforeach()
             add_test(NAME snow-shot-live-window-pin-native-tests
                 COMMAND snow-shot-pinned-window-tests --live-window-native-shell-only
                     -platform windows)
             set_tests_properties(snow-shot-live-window-pin-native-tests PROPERTIES
                 LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 120
+                ENVIRONMENT "QT_QPA_PLATFORM=windows" RESOURCE_LOCK snow-shot-system-clipboard)
+            add_test(NAME snow-shot-live-window-pin-resize-native-tests
+                COMMAND snow-shot-pinned-window-tests --live-window-resize-native-only
+                    -platform windows)
+            set_tests_properties(snow-shot-live-window-pin-resize-native-tests PROPERTIES
+                LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 90
                 ENVIRONMENT "QT_QPA_PLATFORM=windows" RESOURCE_LOCK snow-shot-system-clipboard)
         endif()
     endif()
@@ -13409,15 +13551,56 @@ endif()
 # capabilities before the deferred Mini audit inspects the completed link graphs.
 snow_shot_resolve_source_dependencies()
 
+if(SNOW_SHOT_BUILD_TESTS)
+    add_executable(snow-shot-pinned-crop-render-tests tests/screenshot_pinned_crop_render_tests.cpp)
+    target_include_directories(snow-shot-pinned-crop-render-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../snow_draw_engine_qt/include")
+    target_link_libraries(snow-shot-pinned-crop-render-tests PRIVATE Qt6::Gui)
+    snow_shot_import_offscreen_platform(snow-shot-pinned-crop-render-tests)
+    add_test(NAME snow-shot-pinned-crop-render-tests
+        COMMAND snow-shot-pinned-crop-render-tests -platform offscreen)
+    set_tests_properties(snow-shot-pinned-crop-render-tests PROPERTIES
+        LABELS "unit" TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 if(TARGET snow-shot-pinned-window-tests)
+    add_test(NAME snow-shot-pinned-crop-preview-tests
+        COMMAND snow-shot-pinned-window-tests --crop-preview-only -platform offscreen)
+    set_tests_properties(snow-shot-pinned-crop-preview-tests PROPERTIES
+        LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    foreach(scale IN ITEMS 1.25 1.5 1.75 2 3)
+        add_test(NAME snow-shot-pinned-crop-preview-dpi-${scale}-tests
+            COMMAND snow-shot-pinned-window-tests --crop-preview-only -platform offscreen)
+        set_tests_properties(snow-shot-pinned-crop-preview-dpi-${scale}-tests PROPERTIES
+            LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${scale}")
+    endforeach()
     add_test(NAME snow-shot-pinned-crop-tests
         COMMAND snow-shot-pinned-window-tests --crop-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-crop-tests PROPERTIES
+        LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_test(NAME snow-shot-live-window-crop-tests
+        COMMAND snow-shot-pinned-window-tests --live-window-crop-only -platform offscreen)
+    set_tests_properties(snow-shot-live-window-crop-tests PROPERTIES
+        LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_test(NAME snow-shot-live-window-crop-preview-tests
+        COMMAND snow-shot-pinned-window-tests --live-window-crop-preview-only -platform offscreen)
+    set_tests_properties(snow-shot-live-window-crop-preview-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     foreach(scale IN ITEMS 1.25 2)
         add_test(NAME snow-shot-pinned-crop-dpi-${scale}-tests
             COMMAND snow-shot-pinned-window-tests --crop-only -platform offscreen)
         set_tests_properties(snow-shot-pinned-crop-dpi-${scale}-tests PROPERTIES
+            LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${scale}")
+        add_test(NAME snow-shot-live-window-crop-dpi-${scale}-tests
+            COMMAND snow-shot-pinned-window-tests --live-window-crop-only -platform offscreen)
+        set_tests_properties(snow-shot-live-window-crop-dpi-${scale}-tests PROPERTIES
+            LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${scale}")
+        add_test(NAME snow-shot-live-window-crop-preview-dpi-${scale}-tests
+            COMMAND snow-shot-pinned-window-tests --live-window-crop-preview-only -platform offscreen)
+        set_tests_properties(snow-shot-live-window-crop-preview-dpi-${scale}-tests PROPERTIES
             LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=${scale}")
     endforeach()

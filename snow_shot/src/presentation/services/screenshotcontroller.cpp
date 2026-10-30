@@ -493,7 +493,9 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void cancelHistoryPins();
     ScreenshotFilePinBatch::Present
     filePinPresenter(QScreen* screen, snow_shot::storage::PinnedWindowCreationSource source,
-                     ScreenshotFilePinBatch::DuplicateFilter filter);
+                     ScreenshotFilePinBatch::DuplicateFilter filter,
+                     bool initialAnnotationMode = false,
+                     ScreenshotSelectionExportUiServices::PinnedCompletion completion = {});
     ScreenshotFilePinBatch::DuplicateFilter filePinDuplicateFilter(const QString& action);
     void restorePinnedWindows();
     void restoreActivePinnedGroupWindows();
@@ -1568,7 +1570,9 @@ bool ScreenshotController::Impl::ensureExportFeature() {
         [controller = QPointer<ScreenshotController>(&owner)](
             const ScreenshotPinnedImageSnapshot& snapshot) {
             if (controller)
-                emit controller->imageSplittingRequested(snapshot);
+                emit controller->imageSplittingRequested(
+                    {snapshot.source, snapshot.originalFileName, snapshot.createdUtc,
+                     snapshot.error, snapshot.outputSize});
         },
         [controller = QPointer<ScreenshotController>(&owner)](const QString& id) {
             if (controller)
@@ -3228,8 +3232,12 @@ void ScreenshotController::Impl::openScrollingScreenshotImage(bool editing) {
     }
     const QPointer<ScreenshotController> receiver(&owner);
     const QDateTime createdUtc = QDateTime::currentDateTimeUtc();
+    const auto initialDirection = m_scrollingCaptureController->recognitionMode() ==
+                                          ScreenshotScrollingRecognitionMode::Vertical
+                                      ? snow_shot::presentation::ImageSplitDirection::Horizontal
+                                      : snow_shot::presentation::ImageSplitDirection::Vertical;
     const bool scheduled = m_scrollingCaptureController->requestTrimmedSnapshot(
-        [receiver, sourceSize, createdUtc, editing,
+        [receiver, sourceSize, createdUtc, editing, initialDirection,
          generation = *exportGeneration](ScreenshotScrollingSnapshot snapshot) {
             if (receiver.isNull() || receiver->m_impl == nullptr ||
                 !receiver->m_impl->imageExportCurrent(generation)) {
@@ -3254,7 +3262,7 @@ void ScreenshotController::Impl::openScrollingScreenshotImage(bool editing) {
                 return;
             }
             emit receiver->imageSplittingRequested(
-                {std::move(source), sourceSize, {}, {}, {}, createdUtc});
+                {std::move(source), {}, createdUtc, {}, sourceSize, initialDirection});
         });
     if (!scheduled) {
         static_cast<void>(finishImageExport(*exportGeneration));
@@ -3908,15 +3916,16 @@ void ScreenshotController::Impl::pinHistoryRecord(const QString& recordId) {
     }
 }
 
-ScreenshotFilePinBatch::Present
-ScreenshotController::Impl::filePinPresenter(QScreen* screen,
-                                             snow_shot::storage::PinnedWindowCreationSource source,
-                                             ScreenshotFilePinBatch::DuplicateFilter filter) {
+ScreenshotFilePinBatch::Present ScreenshotController::Impl::filePinPresenter(
+    QScreen* screen, snow_shot::storage::PinnedWindowCreationSource source,
+    ScreenshotFilePinBatch::DuplicateFilter filter, bool initialAnnotationMode,
+    ScreenshotSelectionExportUiServices::PinnedCompletion completion) {
     const QPointer<ScreenshotController> receiver(&owner);
     const QPointer<QScreen> guardedScreen(screen);
     const bool autoResizeWindow = snow_shot::storage::PinToScreenSettings().autoResizeWindow();
-    return [receiver, guardedScreen, autoResizeWindow, source,
-            filter = std::move(filter)](ScreenshotClipboardContent decoded) {
+    return [receiver, guardedScreen, autoResizeWindow, source, initialAnnotationMode,
+            filter = std::move(filter),
+            completion = std::move(completion)](ScreenshotClipboardContent decoded) {
         if (!receiver || !receiver->m_impl || !guardedScreen ||
             !receiver->m_impl->m_selectionExportUiServices) {
             return false;
@@ -3924,7 +3933,8 @@ ScreenshotController::Impl::filePinPresenter(QScreen* screen,
         if (filter.consume && filter.consume(decoded.sourceIdentity))
             return true;
         return receiver->m_impl->m_selectionExportUiServices->presentDecodedContentOnScreen(
-            std::move(decoded), guardedScreen, autoResizeWindow, source);
+            std::move(decoded), guardedScreen, autoResizeWindow, source, initialAnnotationMode,
+            completion);
     };
 }
 
@@ -4685,7 +4695,7 @@ void ScreenshotController::Impl::printSelection() {
                 {{QStringLiteral("request_kind"), QStringLiteral("capture")},
                  {QStringLiteral("operation"), QString::number(epoch)},
                  {QStringLiteral("stage"), !snapshotSucceeded ? QStringLiteral("export_image")
-                                           : !printer ? QStringLiteral("service_destroyed")
+                                           : !printer         ? QStringLiteral("service_destroyed")
                                                       : QStringLiteral("service_rejected")}},
                 QtWarningMsg);
             finished({ScreenshotPrintService::Status::Failed,
@@ -6666,9 +6676,18 @@ bool ScreenshotController::handleActiveScreenshotShortcut(
            m_impl->m_overlayShortcutController->handleGlobalScreenshotShortcut(action, ready);
 }
 
-void ScreenshotController::pinFilesToScreen(QStringList paths) {
-    const auto failure = [this](const QString& path) {
+void ScreenshotController::pinFilesToScreen(QStringList paths,
+                                            std::function<void()> firstFileFinished) {
+    const auto pending = std::make_shared<std::function<void()>>(std::move(firstFileFinished));
+    const auto finish = [pending] {
+        if (*pending)
+            std::exchange(*pending, {})();
+    };
+    const bool initialAnnotationMode =
+        snow_shot::storage::SystemSettings().annotationModeWhenOpeningForEditing();
+    const auto failure = [this, finish](const QString& path) {
         emit selectedFilePinFailed(tr("Could not open the selected file: %1").arg(path));
+        finish();
     };
     const auto supported = ScreenshotClipboardContentReader::supportedFileExtensions();
     QStringList supportedPaths;
@@ -6678,8 +6697,10 @@ void ScreenshotController::pinFilesToScreen(QStringList paths) {
         else
             failure(path);
     }
-    if (supportedPaths.isEmpty())
+    if (supportedPaths.isEmpty()) {
+        finish();
         return;
+    }
     if (!m_impl->ensureExportFeature()) {
         for (const QString& path : supportedPaths)
             failure(path);
@@ -6691,14 +6712,24 @@ void ScreenshotController::pinFilesToScreen(QStringList paths) {
     const QPointer<QScreen> requestedScreen(screen);
     m_impl->m_filePinQueue.enqueue(
         std::move(supportedPaths),
-        [this, requestedScreen] {
+        [this, requestedScreen, initialAnnotationMode, finish] {
             QScreen* target =
                 requestedScreen ? requestedScreen.data() : QGuiApplication::primaryScreen();
             auto filter = m_impl->filePinDuplicateFilter(
                 snow_shot::storage::PinToScreenSettings().duplicateContentAction());
+            if (filter.consume) {
+                filter.consume = [consume = std::move(filter.consume),
+                                  finish](const auto& identity) {
+                    const bool consumed = consume(identity);
+                    if (consumed)
+                        finish();
+                    return consumed;
+                };
+            }
             return ScreenshotFilePinQueue::Options{
                 m_impl->filePinPresenter(
-                    target, snow_shot::storage::PinnedWindowCreationSource::SelectedFiles, filter),
+                    target, snow_shot::storage::PinnedWindowCreationSource::SelectedFiles, filter,
+                    initialAnnotationMode, [finish](bool, QImage) { finish(); }),
                 std::move(filter)};
         },
         failure);

@@ -2501,6 +2501,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
     if (m_shakeMessage)
         m_shakeMessage->close();
     m_deferredPresentationSetupScheduled = false;
+    m_initialAnnotationMode = config.initialAnnotationMode;
     m_recognitionTargetReady = false;
     m_firstContentFramePublished = false;
     m_firstFramePaintPending = false;
@@ -2517,8 +2518,16 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
             m_originalImage = {};
         m_originalImage.setDevicePixelRatio(1.0);
     }
-    m_transformedImage = animatedImage()
-                             ? m_animationSource->firstDisplayFrame
+    const QImage& preparedDisplay = config.preparedDisplayImage;
+    const bool displayPrepared = !m_originalImage.isNull() &&
+                                 preparedDisplay.size() == m_originalImage.size() &&
+                                 preparedDisplay.format() == QImage::Format_ARGB32_Premultiplied &&
+                                 preparedDisplay.devicePixelRatio() == 1.0 &&
+                                 (!preparedDisplay.colorSpace().isValid() ||
+                                  preparedDisplay.colorSpace() == QColorSpace(QColorSpace::SRgb));
+    m_transformedImage = animatedImage() ? m_animationSource->firstDisplayFrame
+                         : displayPrepared
+                             ? preparedDisplay
                              : ScreenshotResultCompositor::normalizeImage(m_originalImage);
     if (!m_transformedImage.isNull()) {
         // Keep the source mapping for baked images that extend beyond the content.
@@ -3392,6 +3401,11 @@ void ScreenshotPinnedWindow::paintEvent(QPaintEvent* event) {
     painter.fillRect(rect(), Qt::transparent);
     if (!m_liveNativePresentation)
         painter.fillRect(contentViewRect(), opaquePinnedBackground(this));
+    else {
+        // Native live content is behind the transparent shell; its canvas is hidden.
+        painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        paintCropSelection(painter, this);
+    }
 }
 
 void ScreenshotPinnedWindow::setWindowSelected(bool selected) {
@@ -3427,6 +3441,10 @@ void ScreenshotPinnedWindow::createUi() {
     m_canvas = new ScreenshotPinnedCanvasWidget(
         m_runtime, this,
         [this]() {
+            if (m_cropSelectionOrigin && !m_liveNativePresentation) {
+                QPainter painter(m_canvas);
+                paintCropSelection(painter, m_canvas);
+            }
             acknowledgeAnimationPaint();
             handleFirstContentFramePainted();
         },
@@ -4072,7 +4090,8 @@ void ScreenshotPinnedWindow::createContextMenu() {
         },
         outlined_icons::Picture());
     setActionTranslationSource(processAction, "Process image");
-    m_applyCropAction = m_contextMenu->addItem(tr("Apply Crop"));
+    m_applyCropAction =
+        m_contextMenu->addItem(tr("Apply Crop"), custom_outlined_icons::ApplyCrop());
     setActionTranslationSource(m_applyCropAction, "Apply Crop");
     m_applyCropAction->setObjectName(QStringLiteral("screenshotPinnedApplyCropAction"));
     m_applyCropAction->setProperty("liveCommand", QStringLiteral("apply_crop"));
@@ -4324,9 +4343,9 @@ void ScreenshotPinnedWindow::refreshContextMenu() {
         const QString label = QCoreApplication::translate("ImageSplitWindow", "Image Splitting");
         m_splitImageAction->setText(label);
         m_splitImageAction->setToolTip(label);
-        m_splitImageAction->setEnabled(liveCommandAllowed(QStringLiteral("split_image")) &&
-                                       m_firstContentFramePublished &&
-                                       !m_transformedImage.isNull() && !m_closing);
+        m_splitImageAction->setEnabled(
+            liveCommandAllowed(QStringLiteral("split_image")) && m_firstContentFramePublished &&
+            (isLiveWindow() || !m_transformedImage.isNull()) && !m_closing);
     }
     if (m_loadContentAction != nullptr) {
         m_loadContentAction->setEnabled(m_firstContentFramePublished && !m_originalImage.isNull() &&
@@ -4677,6 +4696,8 @@ void ScreenshotPinnedWindow::updateBorderOutline() {
 }
 
 void ScreenshotPinnedWindow::updateCanvasViewport() {
+    if (m_liveStatusView)
+        m_liveStatusView->setGeometry(contentViewRect().toAlignedRect());
     if (m_canvas == nullptr || m_platform->isMinimized()) {
         return;
     }
@@ -5132,6 +5153,8 @@ void ScreenshotPinnedWindow::finishDeferredPresentationSetup(quint64 generation)
         m_editButton->show();
     }
     updateControlsGeometry();
+    if (std::exchange(m_initialAnnotationMode, false) && m_editingEnabled)
+        setEditMode(true);
     refreshContextMenuIfVisible();
     SNOW_SHOT_PIN_PERF_MILESTONE("window.recognition_target_ready");
     SNOW_SHOT_PIN_PERF_MILESTONE("window.context_menu_ready");
@@ -5171,6 +5194,7 @@ void ScreenshotPinnedWindow::finishPresentation(bool succeeded, QImage image) {
         succeeded = initializeLivePresentation(&error);
     }
     if (!succeeded) {
+        m_initialAnnotationMode = false;
         m_sourcePinAvailable = false;
         m_attentionPending = false;
     } else if (m_attentionPending) {
@@ -7424,6 +7448,7 @@ bool ScreenshotPinnedWindow::replaceContent(ScreenshotClipboardContent content,
     m_quickSavePending = false;
     cancelCloudUpload();
     ++m_presentationGeneration;
+    m_initialAnnotationMode = false;
     m_deferredPresentationSetupScheduled = false;
     stopRecognition();
     m_recognitionResults = {};
@@ -7578,7 +7603,7 @@ void ScreenshotPinnedWindow::printContent() {
                 {{QStringLiteral("request_kind"), QStringLiteral("pinned")},
                  {QStringLiteral("operation"), QString::number(replacement)},
                  {QStringLiteral("stage"), !snapshotSucceeded ? QStringLiteral("export_image")
-                                           : !printer ? QStringLiteral("service_destroyed")
+                                           : !printer         ? QStringLiteral("service_destroyed")
                                                       : QStringLiteral("service_rejected")}},
                 QtWarningMsg);
             finished({ScreenshotPrintService::Status::Failed,
@@ -7865,7 +7890,7 @@ void ScreenshotPinnedWindow::saveAsFile() {
         });
         return;
     }
-    if (m_transformedImage.isNull() || m_backgroundCanvasRect.isEmpty()) {
+    if ((!isLiveWindow() && m_transformedImage.isNull()) || m_backgroundCanvasRect.isEmpty()) {
         return;
     }
 
@@ -8001,18 +8026,15 @@ void ScreenshotPinnedWindow::applyImageOperation(const QTransform& operation,
     if (!QTransform::quadToQuad(sourceQuad, targetQuad, combined)) {
         return;
     }
-    const int priorQuarterTurns = m_requestedLiveTransform        ? m_requestedLiveQuarterTurns
-                                  : m_requestedAnimationTransform ? m_requestedAnimationQuarterTurns
-                                                                  : m_quarterTurns;
+    const int priorQuarterTurns =
+        m_requestedAnimationTransform ? m_requestedAnimationQuarterTurns : m_quarterTurns;
     const int quarterTurns = ((priorQuarterTurns + quarterTurnDelta) % 4 + 4) % 4;
     applyImageTransform(normalizedImageTransform(combined, m_originalImage.size()), quarterTurns);
 }
 
 void ScreenshotPinnedWindow::resetImageTransform() {
     if (contentReplacementTransform().isIdentity() &&
-        (m_requestedLiveTransform        ? m_requestedLiveQuarterTurns
-         : m_requestedAnimationTransform ? m_requestedAnimationQuarterTurns
-                                         : m_quarterTurns) == 0) {
+        (m_requestedAnimationTransform ? m_requestedAnimationQuarterTurns : m_quarterTurns) == 0) {
         return;
     }
     if (m_originalImage.isNull()) {
@@ -8034,22 +8056,15 @@ void ScreenshotPinnedWindow::applyImageTransform(const QTransform& transform, in
     if (m_cropApplying)
         return;
     if (isLiveWindow()) {
-        ++m_liveFrameGeneration;
-        m_requestedLiveTransform = transform;
-        m_requestedLiveQuarterTurns = quarterTurns;
-        m_automationRevision = snow_shot::presentation::nextAutomationRevision();
-        if (m_liveAppliedCrop.isEmpty()) {
-            queueLiveFrame(m_originalImage);
+        if (!commitImageTransformGeometry(transform, quarterTurns))
             return;
-        }
-        // The displayed base may already have a committed crop. Request a source-local
-        // frame so queueLiveFrame applies that descriptor exactly once.
-        const auto generation = m_liveFrameGeneration;
-        const QPointer<ScreenshotPinnedWindow> receiver(this);
-        m_liveSource->requestFrame([receiver, generation](QImage frame, const QString&) {
-            if (receiver && !receiver->m_closing && receiver->m_liveFrameGeneration == generation)
-                receiver->queueLiveFrame(std::move(frame));
-        });
+        ++m_liveFrameGeneration;
+        m_automationRevision = snow_shot::presentation::nextAutomationRevision();
+        // The installed base already contains any committed crop. Reuse it so
+        // orientation changes neither crop it twice nor wait for another capture.
+        installLiveFrame(m_originalImage);
+        scheduleLivePresentation();
+        updateControlsGeometry();
         return;
     }
     if (m_animationPlayback) {
@@ -8112,8 +8127,6 @@ bool ScreenshotPinnedWindow::commitImageTransformGeometry(const QTransform& tran
 }
 
 QTransform ScreenshotPinnedWindow::contentReplacementTransform() const {
-    if (m_requestedLiveTransform)
-        return *m_requestedLiveTransform;
     return m_requestedAnimationTransform.value_or(m_imageTransform);
 }
 
@@ -8238,6 +8251,10 @@ QRect ScreenshotPinnedWindow::imageTransformGeometry(int quarterTurns) const {
 }
 
 void ScreenshotPinnedWindow::rebuildTransformedImage() {
+    if (isLiveWindow()) {
+        installLiveFrame(m_originalImage);
+        return;
+    }
     if (m_originalImage.isNull()) {
         requestMaterializedImage([this](bool succeeded) {
             if (succeeded && !m_closing) {

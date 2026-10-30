@@ -1099,6 +1099,10 @@ Files:
             <translation>Image Splitting</translation>
         </message>
         <message>
+            <source>Image Stitching is busy. Try again when it finishes.</source>
+            <translation>Image Stitching is busy. Try again when it finishes.</translation>
+        </message>
+        <message>
             <source>Image loading could not be started. Try again.</source>
             <translation>Image loading could not be started. Try again.</translation>
         </message>
@@ -1145,6 +1149,10 @@ Files:
         <message>
             <source>Select Image</source>
             <translation>Select Image</translation>
+        </message>
+        <message>
+            <source>Stitch to PDF</source>
+            <translation>Stitch to PDF</translation>
         </message>
         <message>
             <source>The file manager is unavailable. Open it and try again.</source>
@@ -1695,6 +1703,10 @@ Files:
             <translation>Close this pinned window?</translation>
         </message>
         <message>
+            <source>Closed</source>
+            <translation>Closed</translation>
+        </message>
+        <message>
             <source>Convert to Image</source>
             <translation>Convert to Image</translation>
         </message>
@@ -1833,6 +1845,10 @@ Files:
         <message>
             <source>Lock mode</source>
             <translation>Lock mode</translation>
+        </message>
+        <message>
+            <source>Minimized</source>
+            <translation>Minimized</translation>
         </message>
         <message>
             <source>Move window</source>
@@ -2028,6 +2044,14 @@ Files:
         <message>
             <source>Translation results</source>
             <translation>Translation results</translation>
+        </message>
+        <message>
+            <source>Unavailable</source>
+            <translation>Unavailable</translation>
+        </message>
+        <message>
+            <source>Untitled window</source>
+            <translation>Untitled window</translation>
         </message>
         <message>
             <source>Uploaded to cloud. Link copied to clipboard.</source>

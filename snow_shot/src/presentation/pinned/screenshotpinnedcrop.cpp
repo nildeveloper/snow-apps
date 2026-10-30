@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "snow_shot/presentation/screenshotpinnedwindow.h"
 #include "screenshotpinnedcropgeometry.h"
+#include "snow_draw_engine_qt/snow_canvas_overlay_style.h"
 #include "screenshotpinnednativegeometrycontroller.h"
 #include "pinnedwindowplatform.h"
 #include "snow_shot/presentation/pinnedgeometry.h"
@@ -26,22 +27,6 @@
 #include "widgets/message.h"
 
 namespace crop_geometry = screenshot_pinned_crop_geometry;
-namespace {
-class CropOverlay final : public QWidget {
-  public:
-    explicit CropOverlay(QWidget* parent) : QWidget(parent) {
-        setAttribute(Qt::WA_TransparentForMouseEvents);
-        setObjectName(QStringLiteral("screenshotPinnedCropSelection"));
-    }
-    QRectF selection;
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setPen(QPen(QColor(0x40, 0x96, 0xff), 1, Qt::SolidLine));
-        painter.setBrush(QColor(0x40, 0x96, 0xff, 0x33));
-        painter.drawRect(selection.adjusted(.5, .5, -.5, -.5));
-    }
-};
-} // namespace
 
 QRectF ScreenshotPinnedWindow::visibleCanvasRect() const {
     if (!m_cropRect || m_originalPixelSize.isEmpty())
@@ -84,8 +69,7 @@ bool ScreenshotPinnedWindow::cropSelectionAllowed() const {
            !m_cropApplying && !m_contentReplacementJob.isValid() && !m_clickThroughActive &&
            !hideToTopActive() && !m_thumbnailMode && !m_ocrMode && !m_geometryAnimating &&
            !m_interactionPlacement && !m_selectionGeometryActive && !m_windowDragActive &&
-           !animationTransformPending() && !m_requestedLiveTransform &&
-           (!m_editController || !m_editController->editMode()) &&
+           !animationTransformPending() && (!m_editController || !m_editController->editMode()) &&
            (!isLiveWindow() || liveFrameAvailable());
 }
 
@@ -94,8 +78,7 @@ bool ScreenshotPinnedWindow::cropApplyAllowed() const {
            !m_closing && !m_cropApplying && !m_geometryAnimating && !m_cropSelectionOrigin &&
            !m_interactionPlacement && !m_selectionGeometryActive &&
            !m_contentReplacementJob.isValid() && !animationTransformPending() &&
-           !m_requestedLiveTransform && !m_animationTransformSnapshot &&
-           (!isLiveWindow() || liveFrameAvailable());
+           !m_animationTransformSnapshot && (!isLiveWindow() || liveFrameAvailable());
 }
 
 bool ScreenshotPinnedWindow::beginCropSelection(const QPointF& position) {
@@ -126,43 +109,48 @@ void ScreenshotPinnedWindow::updateCropSelection(const QPointF& position) {
     if (!m_cropSelectionOrigin)
         return;
     const QRectF bounds(m_cropSelectionBounds);
-    m_cropSelectionEnd = {std::clamp(position.x(), bounds.left(), bounds.right()),
-                          std::clamp(position.y(), bounds.top(), bounds.bottom())};
-    updateCropOverlay();
+    const QPointF end{std::clamp(position.x(), bounds.left(), bounds.right()),
+                      std::clamp(position.y(), bounds.top(), bounds.bottom())};
+    if (end == m_cropSelectionEnd)
+        return;
+    QWidget* target = m_liveNativePresentation ? static_cast<QWidget*>(this) : m_canvas;
+    const QRectF previous = cropSelectionViewRect(target);
+    m_cropSelectionEnd = end;
+    if (target)
+        target->update(crop_geometry::selectionRepaintRegion(
+            previous, cropSelectionViewRect(target), target->rect()));
 }
 
-void ScreenshotPinnedWindow::updateCropOverlay() {
-    if (!m_cropSelectionOrigin) {
-        if (m_cropOverlay)
-            m_cropOverlay->hide();
-        return;
-    }
-    if (!m_cropOverlay)
-        m_cropOverlay = new CropOverlay(this);
+QRectF ScreenshotPinnedWindow::cropSelectionViewRect(const QWidget* target) const {
+    if (!m_cropSelectionOrigin || !target)
+        return {};
     const auto native = QRectF(*m_cropSelectionOrigin, m_cropSelectionEnd).normalized();
     const QRectF content = contentViewRect();
     const qreal sx = content.width() / m_cropSelectionGeometry.width();
     const qreal sy = content.height() / m_cropSelectionGeometry.height();
-    auto* overlay = static_cast<CropOverlay*>(m_cropOverlay.data());
-    overlay->selection = QRectF(content.x() + (native.x() - m_cropSelectionGeometry.x()) * sx,
-                                content.y() + (native.y() - m_cropSelectionGeometry.y()) * sy,
-                                native.width() * sx, native.height() * sy);
-    overlay->setGeometry(rect());
-    overlay->show();
-    overlay->raise();
-    overlay->update();
+    const QPointF topLeft(content.x() + (native.x() - m_cropSelectionGeometry.x()) * sx,
+                          content.y() + (native.y() - m_cropSelectionGeometry.y()) * sy);
+    return QRectF(target->mapFrom(this, topLeft),
+                  QSizeF(native.width() * sx, native.height() * sy));
+}
+
+void ScreenshotPinnedWindow::paintCropSelection(QPainter& painter, const QWidget* target) const {
+    snowCanvasPaintSelectionMarquee(painter, cropSelectionViewRect(target));
 }
 
 void ScreenshotPinnedWindow::endCropSelection(bool cancel, const QPoint& menuPosition) {
     if (!m_cropSelectionOrigin)
         return;
     const QRectF selection = QRectF(*m_cropSelectionOrigin, m_cropSelectionEnd).normalized();
+    QWidget* target = m_liveNativePresentation ? static_cast<QWidget*>(this) : m_canvas;
+    const QRectF previous = cropSelectionViewRect(target);
     m_cropSelectionOrigin.reset();
     m_cropContextSuppressed = true;
     qApp->removeEventFilter(this);
     if (QWidget::mouseGrabber() == this)
         releaseMouse();
-    updateCropOverlay();
+    if (target)
+        target->update(crop_geometry::selectionRepaintRegion(previous, {}, target->rect()));
     if (cancel || !cropSelectionAllowed())
         return;
     if (selection.width() < 10 || selection.height() < 10) {
@@ -486,7 +474,7 @@ bool ScreenshotPinnedWindow::commitPreparedCrop(
     m_originalImage = original;
     m_originalPixelSize = original.size();
     m_ocrSupported = screenshotOcrImageWithinPixelLimit(m_originalPixelSize);
-    m_transformedImage = transformed;
+    m_transformedImage = isLiveWindow() && !transform.isIdentity() ? QImage() : transformed;
     m_imageTransform = transform;
     if (bakedStyle)
         m_quarterTurns = 0;
@@ -499,12 +487,16 @@ bool ScreenshotPinnedWindow::commitPreparedCrop(
     m_borderAppearance.reset();
     m_exactInitialWindowSize = baseline;
     m_initialWindowSize = baseline.toSize().expandedTo(QSize(1, 1));
-    m_imageSource = ScreenshotImageSource::fromImage(m_transformedImage, canvas);
+    m_imageSource = ScreenshotImageSource::fromImage(
+        isLiveWindow() ? m_originalImage : m_transformedImage, canvas);
     m_recognitionResults = std::move(results);
     m_recognitionTargetReady = false;
     refreshColorSwatch();
     m_animationSource = std::move(animation);
-    m_screenshotRenderer->setImageSource(m_imageSource);
+    if (isLiveWindow())
+        m_screenshotRenderer->setPinnedLiveFrame(m_imageSource, m_imageTransform);
+    else
+        m_screenshotRenderer->setImageSource(m_imageSource);
     m_screenshotRenderer->setPinnedResultSurface(canvas, canvas, m_resultStyle);
     if (m_animationPlayback) {
         static_cast<void>(m_animationPlayback->adoptCroppedSource(m_animationSource, original,

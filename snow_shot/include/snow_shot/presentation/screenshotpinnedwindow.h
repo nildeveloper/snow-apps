@@ -174,6 +174,8 @@ class ScreenshotPinnedWindow final : public QWidget {
         ScreenshotImageSource imageSource;
         std::shared_ptr<snow_shot::presentation::LiveWindowSource> liveSource;
         std::shared_ptr<const ScreenshotAnimationSource> animationSource;
+        // Identity-transform sRGB view of imageSource; original pixels remain available.
+        QImage preparedDisplayImage;
         QImage initialPreparedAnimationFrame;
         QTransform initialPreparedAnimationTransform;
         ScreenshotImageLoader imageLoader;
@@ -181,6 +183,7 @@ class ScreenshotPinnedWindow final : public QWidget {
         ScreenshotAirDropService* airDropService = nullptr;
         QScreen* screen = nullptr;
         bool enableEditing = true;
+        bool initialAnnotationMode = false;
         bool automaticTextRecognition = !snow_shot::app::edition::isMini;
         std::shared_ptr<QTextDocument> formattedTextDocument;
         QString formattedPlainText;
@@ -323,15 +326,8 @@ class ScreenshotPinnedWindow final : public QWidget {
     friend class PinnedWindowWindowsEvents;
     bool m_destroying = false;
     std::shared_ptr<snow_shot::presentation::LiveWindowSource> m_liveSource;
-    QLabel* m_liveStatusLabel = nullptr;
-    QImage m_livePendingFrame;
-    QFutureWatcher<QImage>* m_liveFrameWatcher = nullptr;
-    QImage m_liveProcessingOriginal;
-    quint64 m_liveProcessingGeneration = 0;
-    std::optional<QTransform> m_requestedLiveTransform;
-    int m_requestedLiveQuarterTurns = 0;
+    QWidget* m_liveStatusView = nullptr;
     quint64 m_liveFrameGeneration = 0;
-    bool m_liveFrameProcessing = false;
     bool m_livePresentationUpdatePending = false;
     bool m_liveNativePresentation = false;
     bool m_liveSnapshotPending = false;
@@ -389,7 +385,8 @@ class ScreenshotPinnedWindow final : public QWidget {
                             std::shared_ptr<const ScreenshotAnimationSource> animation,
                             bool bakedStyle);
     bool m_cropApplying = false;
-    void updateCropOverlay();
+    [[nodiscard]] QRectF cropSelectionViewRect(const QWidget* target) const;
+    void paintCropSelection(QPainter& painter, const QWidget* target) const;
     void updateCropPresentation();
     QSizeF m_exactInitialWindowSize;
     std::optional<QRectF> m_cropRect;
@@ -399,7 +396,6 @@ class ScreenshotPinnedWindow final : public QWidget {
     QRectF m_cropSelectionCanvas;
     QRectF m_cropSelectionBounds;
     qreal m_cropSelectionScale = 1;
-    QPointer<QWidget> m_cropOverlay;
     bool m_cropContextSuppressed = false;
     std::optional<QRectF> m_interactionCropRect;
     QRectF m_interactionCropCanvas;
@@ -418,7 +414,7 @@ class ScreenshotPinnedWindow final : public QWidget {
     bool synchronizeLivePresentation(QString* error = nullptr);
     void updateLiveState();
     void queueLiveFrame(QImage frame);
-    void installLiveFrame(QImage original, QImage transformed);
+    void installLiveFrame(QImage original);
     [[nodiscard]] std::shared_ptr<ScreenshotExportArtifact>
     liveViewportArtifact(bool applyWindowOpacity = true);
     [[nodiscard]] ScreenshotExportSource liveExportSource(bool applyWindowOpacity = true);
@@ -721,6 +717,7 @@ class ScreenshotPinnedWindow final : public QWidget {
     bool m_completePresentationAfterFirstFrame = false;
     bool m_recognitionTargetReady = false;
     bool m_deferredPresentationSetupScheduled = false;
+    bool m_initialAnnotationMode = false;
     quint64 m_presentationGeneration = 0;
     SnowCanvasWidget* m_canvas = nullptr;
     std::unique_ptr<ScreenshotCanvasRenderer> m_screenshotRenderer;

@@ -1234,7 +1234,7 @@ SettingsItemDefinition toggleWindowUnderCursorAlwaysOnTopItem() {
                           "Toggle whether the window under the cursor stays above other windows"),
         {}, GlobalShortcutAction::ToggleWindowUnderCursorAlwaysOnTop,
         QStringLiteral("global_shortcuts/toggle_window_under_cursor_always_on_top"),
-        []() { return outlined_icons::ToTop(); });
+        []() { return custom_outlined_icons::WindowUnderCursorAlwaysOnTop(); });
 }
 #endif
 
@@ -2467,7 +2467,9 @@ SettingsItemDefinition contextMenuModeItem() {
                           "Add Edit with Snow Shot to the Windows context menu to pin a "
                           "supported image or document file to the screen."),
         QStringLiteral("system/context_menu_mode"), SettingsSelectBinding::ContextMenuMode,
-        {{QStringLiteral("image_files"),
+        {{QStringLiteral("images_only"),
+          settingsText(QT_TRANSLATE_NOOP("SettingsCatalog", "Image files"))},
+         {QStringLiteral("image_files"),
           settingsText(QT_TRANSLATE_NOOP("SettingsCatalog", "Image and document files"))},
          {QStringLiteral("disabled"),
           settingsText(QT_TRANSLATE_NOOP("SettingsCatalog", "Disabled"))}});
@@ -2617,6 +2619,10 @@ QVector<SettingsItemDefinition> screenshotShortcutItems() {
         localShortcutItem(SettingsLocalShortcutScope::Screenshot, QStringLiteral("pin_to_screen"),
                           QT_TRANSLATE_NOOP("SettingsCatalog", "Pin to screen"),
                           []() { return custom_outlined_icons::PinToScreen(); }),
+        localShortcutItem(SettingsLocalShortcutScope::Screenshot,
+                          QStringLiteral("pin_window_to_screen"),
+                          QT_TRANSLATE_NOOP("SettingsCatalog", "Pin Window to Screen"),
+                          []() { return custom_outlined_icons::PinWindowToScreen(); }),
         localShortcutItem(SettingsLocalShortcutScope::Screenshot, QStringLiteral("video_recording"),
                           QT_TRANSLATE_NOOP("SettingsCatalog", "Video recording"),
                           []() { return custom_outlined_icons::RecordScreen(); }),
@@ -3396,6 +3402,15 @@ QVector<SettingsPageDefinition> builtInPages() {
 #endif
 #ifdef Q_OS_WIN
                   contextMenuModeItem(),
+                  switchItem(
+                      QStringLiteral("system.annotation-mode-when-opening-for-editing"),
+                      QT_TRANSLATE_NOOP("SettingsCatalog",
+                                        "Enable annotation mode when opening for editing"),
+                      QT_TRANSLATE_NOOP("SettingsCatalog",
+                                        "Automatically enable annotation mode in new Pin to Screen "
+                                        "windows opened with Edit with Snow Shot."),
+                      QStringLiteral("system/annotation_mode_when_opening_for_editing"),
+                      SettingsSwitchBinding::AnnotationModeWhenOpeningForEditing),
 #endif
                   updateModeItem()},
              },
@@ -4827,7 +4842,7 @@ TrayCommandManifest buildBuiltInTrayCommandManifest() {
                 QT_TRANSLATE_NOOP("SettingsCatalog",
                                   "Toggle Always on Top for the Window Under the Cursor"),
                 GlobalShortcutAction::ToggleWindowUnderCursorAlwaysOnTop,
-                []() { return outlined_icons::ToTop(); }),
+                []() { return custom_outlined_icons::WindowUnderCursorAlwaysOnTop(); }),
 #endif
           quick(
               QStringLiteral("quick.toggle-global-hotkeys"),
@@ -5404,6 +5419,10 @@ QStringList SettingsCatalog::validationErrors() const {
                         break;
                     case SettingsSwitchBinding::AutoStartAtBoot:
                         expectedKey = QStringLiteral("system/auto_start_at_boot");
+                        break;
+                    case SettingsSwitchBinding::AnnotationModeWhenOpeningForEditing:
+                        expectedKey =
+                            QStringLiteral("system/annotation_mode_when_opening_for_editing");
                         break;
                     case SettingsSwitchBinding::DrawingAutomaticallySelectNewlyCreatedElements:
                         expectedKey =
