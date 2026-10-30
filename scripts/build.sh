@@ -29,6 +29,9 @@ fi
 snow_setup_tools
 cd "$snow_repo_root"
 [[ -x .tools/vcpkg/vcpkg ]] || snow_die 'Run scripts/bootstrap-macos.sh first.'
+if [[ "$snow_arch" == arm64 ]]; then
+    python3 "$snow_repo_root/scripts/prepare-macos13-metal.py"
+fi
 if [[ "$skip_bootstrap" == 0 ]]; then
     "$snow_repo_root/scripts/bootstrap-macos.sh" "$snow_preset" --skip-dependency-install
 fi

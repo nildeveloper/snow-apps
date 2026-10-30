@@ -1062,6 +1062,15 @@ class MacOSBuildScripts(unittest.TestCase):
         self.bin = self.root / ".tools/macos-dev/bin"
         self.bin.mkdir(parents=True)
         self.log = self.root / "commands.jsonl"
+        # Source preparation has separate real-Git tests. This shell fixture
+        # verifies architecture selection, ordering, and failure propagation.
+        (self.root / 'scripts/prepare-macos13-metal.py').write_text('''
+import json, os, sys
+with open(os.environ['SNOW_TEST_LOG'], 'a') as stream:
+    stream.write(json.dumps(['prepare-macos13-metal']) + '\\n')
+if os.environ.get('FAIL_METAL_PREPARATION'):
+    sys.exit('fixture: Metal preparation failed')
+''')
         # A mock command logs its argv as JSON, preserving spaces and boundaries.
         mock = """#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -1236,6 +1245,26 @@ if name == 'openssl':
         calls = self.run_script("build.sh")
         self.assertIn(["cmake", "--build", "--preset", "build-snow-shot-macos-arm64-debug",
                        "--target", "snow_shot", "snow_shot_mini", "--parallel"], calls)
+
+    def test_arm64_prepares_metal_before_bootstrap_and_configure(self):
+        calls = self.run_script('build.sh')
+        preparation = calls.index(['prepare-macos13-metal'])
+        configure = next(i for i, call in enumerate(calls)
+                         if call[0] == 'cmake' and '--preset' in call)
+        self.assertLess(preparation, configure)
+        self.assertEqual(calls.count(['prepare-macos13-metal']), 1)
+
+    def test_x64_does_not_prepare_arm64_metal(self):
+        calls = self.run_script('build.sh', 'snow-shot-macos-x64-debug')
+        self.assertNotIn(['prepare-macos13-metal'], calls)
+
+    def test_metal_preparation_failure_stops_before_configure_or_build(self):
+        self.env['FAIL_METAL_PREPARATION'] = '1'
+        calls = self.run_script('build.sh', '--skip-bootstrap', success=False)
+        self.assertIn(['prepare-macos13-metal'], calls)
+        self.assertFalse(any(call[0] == 'cmake' and ('--preset' in call or '--build' in call)
+                             for call in calls))
+        self.assertIn('Metal preparation failed', self.last_result.stderr)
 
     def test_default_build_respects_disabled_mini(self):
         calls = self.run_script("build.sh", "--", "-DSNOW_APPS_BUILD_SNOW_SHOT_MINI=OFF")

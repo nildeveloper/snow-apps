@@ -1,9 +1,20 @@
 # macOS 13 OCR build compatibility
 
-The compatibility release workflow applies `macos13-metal-tt.patch` to its
-checked-out OCR submodule before building the ARM64 worker. The patch is checked
-with `git apply --check`, so a changed upstream source fails before compilation.
-The recorded submodule commit is unchanged.
+The compatibility release workflow and local ARM64 `scripts/build.sh` both run
+`python3 scripts/prepare-macos13-metal.py` before the application build. Intel
+builds do not need this preparation. Direct CMake/Cargo ARM64 builds must run the
+same command explicitly first.
+
+The helper verifies the OCR checkout matches the recorded submodule commit and
+checks `macos13-metal-tt.patch` against a temporary copy of that committed source.
+It accepts only the exact original `build.rs` or its exact patched form, refusing
+unrelated local edits or a different submodule revision. After a successful native
+toolchain probe it changes only `src/runtime/gpu/metal/build.rs` in the submodule
+working tree and prints that action; the recorded commit and index are unchanged.
+Repeated runs recognize the exact patch without rewriting it, but still probe the
+current toolchain. A failed probe leaves the source untouched. This deliberately
+retains the existing CI working-tree patch model rather than introducing another
+Cargo workspace or silently rewriting user edits.
 
 The Xcode 16 Metal translator on the macOS 15 runner rejects `-no-pack-sources`
 and `-compress-resources`. These optional packing flags are removed from the
@@ -16,7 +27,7 @@ patch omits these optional settings and uses the older descriptor defaults. It
 retains function identity, threadgroup constraints, stack depth and binary-function
 settings so the archive still matches the runtime pipeline descriptor.
 
-After applying the patch, the workflow runs
+Before applying the patch, the shared helper runs
 `python3 scripts/check-macos13-metal-toolchain.py`. This compiles a tiny shader,
 links its IR library and translates a native archive for the same SDK/architecture
 and descriptor schema as OCR, before the expensive dependency and application
@@ -26,6 +37,11 @@ run a GPU kernel or validate OCR results.
 This does not change the minimum application deployment target. The upstream
 Metal backend requires macOS 14 or newer at runtime; macOS 13 retains CPU OCR.
 The native application and shader build must still be validated on macOS.
+
+Run `python3 scripts/test-prepare-macos13-metal.py -v` for focused temporary-Git
+fixtures covering repeat application, revision mismatch, user changes, symlinks,
+patch mismatch and probe failure. These require the initialized OCR submodule but
+do not modify it or require a native Metal toolchain.
 
 Run `python3 scripts/test-macos13-metal-build.py -v` with Cargo on `PATH` for the
 focused build-script regression check. It reproduces the rejected argument with

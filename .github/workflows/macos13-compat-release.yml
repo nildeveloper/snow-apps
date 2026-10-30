@@ -163,14 +163,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Xcode 16's metal-tt rejects the optional resource packing flags.
-          # Keep native archives and outer deflate compression enabled.
-          # Fail if the pinned upstream source no longer matches the patch.
-          patch="${GITHUB_WORKSPACE}/cmake/ocr/macos13-metal-tt.patch"
-          ocr="${GITHUB_WORKSPACE}/snow-crates/crates/simd-paddle-ocr-rs"
-          git -C "${ocr}" apply --check "${patch}"
-          git -C "${ocr}" apply "${patch}"
-          python3 scripts/check-macos13-metal-toolchain.py
+          python3 scripts/prepare-macos13-metal.py
 
       - name: Select Rust toolchain
         shell: bash
@@ -246,6 +239,7 @@ jobs:
         run: |
           cargo test --locked --manifest-path snow-crates/Cargo.toml -p snow-macos --lib capabilities::tests
           cargo test --locked --manifest-path snow-crates/Cargo.toml -p snow-macos --lib content::tests::fallback_window_displays
+          cargo test --locked --manifest-path snow-crates/Cargo.toml -p snow-capture-c --lib macos::tests::live_window_profile_is_explicit_and_preserves_native_pixels
 
       - name: Resolve reusable vcpkg cache
         id: vcpkg-cache-key
