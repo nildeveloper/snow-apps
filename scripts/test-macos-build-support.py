@@ -386,51 +386,6 @@ class QtKitValidation(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which('cmake'), 'CMake is required for Mini cache checks')
-class MiniCargoCachePolicy(unittest.TestCase):
-    def configure(self, mini=None, success=True):
-        with tempfile.TemporaryDirectory(prefix='snow mini cargo ') as temporary:
-            root = Path(temporary)
-            build = root / 'build'
-            full = root / 'external cargo'
-            options = []
-            if mini is not None:
-                selected = mini(root, full)
-                options.append('-DSNOW_SHOT_MINI_CARGO_TARGET_DIR:PATH=' + str(selected))
-            (root / 'CMakeLists.txt').write_text(f'''
-cmake_minimum_required(VERSION 3.25)
-project(mini_cargo_fixture NONE)
-include("{(ROOT / 'cmake/SnowShotMiniBuildContract.cmake').as_posix()}")
-set(SNOW_RUST_CARGO_TARGET_DIR "{full.as_posix()}")
-function(mini_scope)
-    snow_shot_mini_cargo_target_directory(SNOW_RUST_CARGO_TARGET_DIR)
-    file(WRITE "${{CMAKE_BINARY_DIR}}/selected.txt" "${{SNOW_RUST_CARGO_TARGET_DIR}}")
-endfunction()
-mini_scope()
-if(NOT SNOW_RUST_CARGO_TARGET_DIR STREQUAL "{full.as_posix()}")
-    message(FATAL_ERROR "Mini path changed Full's target directory")
-endif()
-''')
-            result = subprocess.run(['cmake', '-S', str(root), '-B', str(build), *options],
-                                    text=True, capture_output=True, timeout=30)
-            self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
-            if success:
-                expected = build / 'cargo-mini' if mini is None else selected.resolve()
-                self.assertEqual((build / 'selected.txt').read_text(), expected.as_posix())
-            else:
-                self.assertIn('must be different', result.stderr)
-
-    def test_default_remains_local_and_does_not_change_full(self):
-        self.configure()
-
-    def test_external_mini_cache_remains_separate_from_full(self):
-        self.configure(lambda root, full: full / 'mini')
-
-    def test_same_directory_and_normalized_alias_are_rejected(self):
-        for suffix in ('', '/unused/..'):
-            with self.subTest(suffix=suffix):
-                self.configure(lambda root, full: str(full) + suffix, success=False)
-
-
 class QtMacOSDeploymentPolicy(unittest.TestCase):
     @unittest.skipUnless(shutil.which('cmake'), 'CMake is required for generated-header checks')
     def test_jthread_generated_header_changes_only_when_content_changes(self):
@@ -1146,15 +1101,6 @@ class MacOSBuildScripts(unittest.TestCase):
         self.bin = self.root / ".tools/macos-dev/bin"
         self.bin.mkdir(parents=True)
         self.log = self.root / "commands.jsonl"
-        # Source preparation has separate real-Git tests. This shell fixture
-        # verifies architecture selection, ordering, and failure propagation.
-        (self.root / 'scripts/prepare-macos13-metal.py').write_text('''
-import json, os, sys
-with open(os.environ['SNOW_TEST_LOG'], 'a') as stream:
-    stream.write(json.dumps(['prepare-macos13-metal']) + '\\n')
-if os.environ.get('FAIL_METAL_PREPARATION'):
-    sys.exit('fixture: Metal preparation failed')
-''')
         # A mock command logs its argv as JSON, preserving spaces and boundaries.
         mock = """#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -1329,45 +1275,6 @@ if name == 'openssl':
         calls = self.run_script("build.sh")
         self.assertIn(["cmake", "--build", "--preset", "build-snow-shot-macos-arm64-debug",
                        "--target", "snow_shot", "snow_shot_mini", "--parallel"], calls)
-
-    def test_arm64_prepares_metal_before_bootstrap_and_configure(self):
-        calls = self.run_script('build.sh')
-        preparation = calls.index(['prepare-macos13-metal'])
-        configure = next(i for i, call in enumerate(calls)
-                         if call[0] == 'cmake' and '--preset' in call)
-        self.assertLess(preparation, configure)
-        self.assertEqual(calls.count(['prepare-macos13-metal']), 1)
-
-    def test_x64_does_not_prepare_arm64_metal(self):
-        calls = self.run_script('build.sh', 'snow-shot-macos-x64-debug')
-        self.assertNotIn(['prepare-macos13-metal'], calls)
-
-    def test_explicit_non_ocr_targets_do_not_prepare_metal(self):
-        self.env['FAIL_METAL_PREPARATION'] = '1'
-        calls = self.run_script('build.sh', '--skip-bootstrap',
-                                '--target', 'snow_image', '--target', 'snow-format')
-        self.assertNotIn(['prepare-macos13-metal'], calls)
-        self.assertTrue(any('--build' in call for call in calls))
-
-    def test_explicit_application_targets_prepare_metal_once(self):
-        calls = self.run_script('build.sh', '--skip-bootstrap', '--target', 'snow_image',
-                                '--target', 'snow_shot', '--target', 'snow_shot_mini')
-        self.assertEqual(calls.count(['prepare-macos13-metal']), 1)
-
-    def test_explicit_ocr_and_aggregate_targets_prepare_metal(self):
-        for target in ('snow_ocr_process_build', 'snow-all', 'snow-tests', 'all', 'package', 'install'):
-            with self.subTest(target=target):
-                self.log.unlink(missing_ok=True)
-                calls = self.run_script('build.sh', '--skip-bootstrap', '--target', target)
-                self.assertEqual(calls.count(['prepare-macos13-metal']), 1)
-
-    def test_metal_preparation_failure_stops_before_configure_or_build(self):
-        self.env['FAIL_METAL_PREPARATION'] = '1'
-        calls = self.run_script('build.sh', '--skip-bootstrap', success=False)
-        self.assertIn(['prepare-macos13-metal'], calls)
-        self.assertFalse(any(call[0] == 'cmake' and ('--preset' in call or '--build' in call)
-                             for call in calls))
-        self.assertIn('Metal preparation failed', self.last_result.stderr)
 
     def test_default_build_respects_disabled_mini(self):
         calls = self.run_script("build.sh", "--", "-DSNOW_APPS_BUILD_SNOW_SHOT_MINI=OFF")
@@ -1643,7 +1550,7 @@ if name == 'openssl':
                          and '--build' not in call)
         self.assertIn(f'Qt6_DIR={static_qt}', configure)
 
-    def test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging(self):
+    def test_ci_cached_build_reuses_only_compiler_outputs_and_packages_once(self):
         workflow = (ROOT / '.github/workflows/macos13-compat-release.yml').read_text()
         step = workflow.split('      - name: Build Snow Shot with compiler caches\n', 1)[1]
         body = step.split('        run: |\n', 1)[1].split('\n      - name:', 1)[0]
@@ -1659,23 +1566,31 @@ if name == 'openssl':
         compiled = external / 'cargo-target/full/retained.rlib'
         compiled.parent.mkdir(parents=True)
         compiled.write_bytes(b'reuse this output')
-        stale = self.root / 'build/snow-shot-macos-arm64-release/stale-output'
-        stale.parent.mkdir(parents=True)
-        stale.touch()
+        mini = external / 'cargo-target/mini/retained-helper'
+        mini.parent.mkdir(parents=True)
+        mini.write_bytes(b'reuse this Mini helper')
+        self.env['GITHUB_WORKSPACE'] = str(self.root)
         self.env['SNOW_COMPILE_CACHE_ROOT'] = str(external)
         result = subprocess.run(['/bin/bash', '-c', body], cwd=self.root,
                                 env=self.env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(stale.exists())
+        link = self.root / 'build/snow-shot-macos-arm64-release/cargo-mini'
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), mini.parent)
+        self.assertEqual((link / 'retained-helper').read_bytes(), b'reuse this Mini helper')
         self.assertEqual(compiled.read_bytes(), b'reuse this output')
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         configure = next(call for call in calls if call[0] == 'cmake'
                          and '--preset' in call and '--build' not in call)
         self.assertIn(f'-DSNOW_RUST_CARGO_TARGET_DIR:PATH={external}/cargo-target/full', configure)
-        self.assertIn(f'-DSNOW_SHOT_MINI_CARGO_TARGET_DIR:PATH={external}/cargo-target/mini', configure)
+        self.assertFalse(any('SNOW_SHOT_MINI_CARGO_TARGET_DIR' in arg for arg in configure))
         for language in ('C', 'CXX', 'OBJCXX'):
             self.assertIn(f'-DCMAKE_{language}_COMPILER_LAUNCHER=ccache', configure)
         self.assertIn('-DCMAKE_CXX_FLAGS:STRING=-Xclang -fno-pch-timestamp', configure)
+        repeated = subprocess.run(['/bin/bash', '-c', body], cwd=self.root,
+                                  env=self.env, text=True, capture_output=True)
+        self.assertNotEqual(repeated.returncode, 0)
+        self.assertIn('Expected a fresh CMake build directory', repeated.stderr)
         self.log.unlink()
         calls = self.run_script('package-snow-shot.sh', 'snow-shot-macos-arm64-release',
                                 '--skip-build')

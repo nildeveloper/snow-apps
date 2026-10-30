@@ -34,16 +34,22 @@ Cargo target directory and ccache objects. Cargo configuration and credentials
 are excluded. Dependency sources travel with the compiled outputs to preserve
 their timestamps. CMake configuration and application bundles are never restored.
 
-`build.sh --clean` still creates a fresh CMake tree. The main Cargo target root
-is passed explicitly outside that tree. C/C++/Objective-C++ use ccache, configured
-with content-based compiler checks and the documented Clang PCH settings
-(`pch_defines,time_macros`, `-Xclang -fno-pch-timestamp`). Build-time date macros
-must not be used as release identity; the source version remains authoritative.
-Full, Mini helpers and native tests use separate persistent roots under
-`cargo-target/{full,mini,tests}`. Mini defaults to its original build-local directory
-outside CI, and rejects a target directory shared with Full. Generated compatibility
-headers retain their timestamp on no-op configure; app diagnostics revision macros
-apply only to `main.cpp`, not unrelated application translation units.
+CI requires a fresh CMake tree and invokes the unchanged upstream `build.sh`.
+Only Cargo outputs and ccache are restored, never CMake configuration, native
+object trees or application bundles. Full and native tests have explicit separate
+external target roots. For ARM64, CI links upstream's fixed `build/<preset>/cargo-mini`
+path to the separate `cargo-target/mini` cache; no Mini CMake policy fork is needed.
+C/C++/Objective-C++ use ccache with content-based compiler checks and the documented
+Clang PCH settings (`pch_defines,time_macros`, `-Xclang -fno-pch-timestamp`).
+The upstream diagnostics revision macros are unchanged; a new revision can still
+invalidate affected application translation units even with a cache hit.
+The compatibility-only generated header retains its timestamp on no-op configure.
+
+Dependency tree and compiler archives share one transport helper. Qt and vcpkg
+still retain their distinct exact identities and post-restore validation. A cache
+miss is allowed; permission failures or corrupt archives fail rather than being
+silently reported as a miss. Metal preparation is an explicit compatibility step,
+not a change to the shared build or packaging entry points.
 
 Packaging consumes the already built binaries with `--skip-build`, avoiding a
 second build/cleanup. Compilation caches are saved even if compilation or
@@ -60,9 +66,8 @@ Run these focused checks from the repository root:
 ```sh
 python3 scripts/test-macos13-compile-cache.py -v
 python3 scripts/test-prepare-macos13-metal.py -v
-python3 scripts/test-diagnostics-compile-scope.py -v
-python3 scripts/test-macos-build-support.py QtMacOSDeploymentPolicy MiniCargoCachePolicy \
-  MacOSBuildScripts.test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging -v
+python3 scripts/test-macos-build-support.py QtMacOSDeploymentPolicy \
+  MacOSBuildScripts.test_ci_cached_build_reuses_only_compiler_outputs_and_packages_once -v
 ```
 
 Cache transport uses real tar/zstd with a simulated GitHub API. The build script

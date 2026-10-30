@@ -3,25 +3,6 @@
 # dependencies remain available because Mini still saves images and records.
 include_guard(GLOBAL)
 
-function(snow_shot_mini_cargo_target_directory output)
-    set(SNOW_SHOT_MINI_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo-mini" CACHE PATH
-        "Separate Cargo output directory for Mini edition helpers.")
-    if(SNOW_SHOT_MINI_CARGO_TARGET_DIR STREQUAL "")
-        message(FATAL_ERROR "SNOW_SHOT_MINI_CARGO_TARGET_DIR must not be empty")
-    endif()
-    get_filename_component(_mini "${SNOW_SHOT_MINI_CARGO_TARGET_DIR}" REALPATH
-        BASE_DIR "${CMAKE_BINARY_DIR}")
-    set(_full "${SNOW_RUST_CARGO_TARGET_DIR}")
-    if(_full STREQUAL "")
-        set(_full "${CMAKE_BINARY_DIR}/cargo")
-    endif()
-    get_filename_component(_full "${_full}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
-    if(_mini STREQUAL _full)
-        message(FATAL_ERROR "Mini and Full Cargo target directories must be different")
-    endif()
-    set(${output} "${_mini}" PARENT_SCOPE)
-endfunction()
-
 set(SNOW_SHOT_MINI_EXCLUDED_SOURCE_NAMES
     selectedtexttranslationcoordinator selectedtexttranslationcontroller
     standalonetranslationwindow translationpagewidget translationpagecontroller

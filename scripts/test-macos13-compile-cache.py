@@ -45,8 +45,8 @@ class CompilationCache(unittest.TestCase):
             PATH=str(self.tools) + os.pathsep + os.environ['PATH'],
             CACHE_TEST_LOG=str(self.directory / 'calls.jsonl'))
 
-    def run_cache(self, mode):
-        return subprocess.run(['bash', str(SCRIPT), mode], env=self.environment,
+    def run_cache(self, mode, *arguments):
+        return subprocess.run(['bash', str(SCRIPT), mode, *arguments], env=self.environment,
                               text=True, capture_output=True)
 
     def test_cold_cache_allows_building(self):
@@ -108,6 +108,81 @@ class CompilationCache(unittest.TestCase):
         self.assertNotIn('Restored compilation cache', result.stdout)
 
 
+class DependencyTreeCache(CompilationCache):
+    def setUp(self):
+        super().setUp()
+        self.environment.pop('SNOW_COMPILE_CACHE_ROOT')
+        self.environment.pop('COMPILE_CACHE_ARTIFACT')
+
+    def run_cache(self, mode, *arguments):
+        # Exercise the same cold/permission/corruption guarantees for gzip trees.
+        return super().run_cache(mode + '-tree', self.artifact, str(self.cache))
+
+    def test_cold_cache_allows_building(self):
+        self.cache.mkdir()
+        sentinel = self.cache / 'existing'
+        sentinel.write_text('unchanged')
+        result = self.run_cache('restore')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'false')
+        self.assertEqual(sentinel.read_text(), 'unchanged')
+        self.assertEqual(len((self.directory / 'calls.jsonl').read_text().splitlines()), 1)
+
+    def test_round_trip_preserves_compiler_outputs_and_excludes_credentials(self):
+        # Directory payloads have the same parent-relative layout as existing Qt/vcpkg caches.
+        for artifact, files in (
+            ('macos13-vcpkg-arm64-fingerprint', ['arm64-osx-snow-shot-static/include/zlib.h',
+                                               'vcpkg/status']),
+            ('macos13-static-qt-x64-fingerprint', ['lib/cmake/Qt6/Qt6Config.cmake', 'bin/moc']),
+        ):
+            with self.subTest(artifact=artifact):
+                self.artifact = artifact
+                for relative in files:
+                    path = self.cache / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(relative)
+                    path.chmod(0o755)
+                    os.utime(path, (1700000000, 1700000000))
+                link = self.cache / 'linked-file'
+                link.symlink_to(files[0])
+                result = self.run_cache('pack')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                archive = self.directory / (artifact + '.tar.gz')
+                zipped = self.directory / 'artifact.zip'
+                with zipfile.ZipFile(zipped, 'w') as package:
+                    package.write(archive, archive.name)
+                (self.cache / 'stale-file').touch()
+                self.environment['CACHE_TEST_ZIP'] = str(zipped)
+                result = self.run_cache('restore')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), 'true')
+                self.assertFalse((self.cache / 'stale-file').exists())
+                self.assertTrue(link.is_symlink())
+                for relative in files:
+                    path = self.cache / relative
+                    self.assertEqual(path.read_text(), relative)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o755)
+                    self.assertEqual(int(path.stat().st_mtime), 1700000000)
+                calls = [json.loads(line) for line in
+                         (self.directory / 'calls.jsonl').read_text().splitlines()]
+                self.assertIn('name=' + artifact, calls[-2][1])
+                self.assertFalse(list(self.directory.glob('snow-compile-cache.*')))
+                shutil.rmtree(self.cache)
+
+    def test_corrupt_archive_fails_restoration(self):
+        for contents in (b'not a gzip stream', None):
+            with self.subTest(contents=contents):
+                zipped = self.directory / 'artifact.zip'
+                with zipfile.ZipFile(zipped, 'w') as package:
+                    package.writestr(self.artifact + '.tar.gz' if contents else 'wrong-name',
+                                     contents or b'missing expected archive')
+                self.environment['CACHE_TEST_ZIP'] = str(zipped)
+                result = self.run_cache('restore')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn(result.stdout.strip(), ('true', 'false'))
+                self.assertFalse(list(self.directory.glob('snow-compile-cache.*')))
+
+
 class CompilationIdentity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -158,6 +233,38 @@ class CompilationIdentity(unittest.TestCase):
         self.assertIn('cargo-target/mini', self.workflow)
         self.assertIn('CARGO_TARGET_DIR: ${{ env.SNOW_COMPILE_CACHE_ROOT }}/cargo-target/tests',
                       self.workflow)
+
+    def test_dependency_restore_steps_do_not_hide_transport_errors(self):
+        with tempfile.TemporaryDirectory(prefix='snow workflow cache ') as temporary:
+            root = Path(temporary)
+            tool = root / 'gh'
+            tool.write_text(GH)
+            tool.chmod(0o755)
+            output = root / 'output'
+            for name in ('vcpkg', 'static Qt'):
+                step = self.workflow.split(f'      - name: Restore reusable {name} artifact\n', 1)[1]
+                command = textwrap.dedent(step.split('        run: |\n', 1)[1]
+                                         .split('\n      - name:', 1)[0])
+                command = command.replace('${{ matrix.arch }}', 'arm64')
+                for denied in (False, True):
+                    with self.subTest(name=name, denied=denied):
+                        output.unlink(missing_ok=True)
+                        environment = dict(os.environ, GITHUB_WORKSPACE=str(root),
+                            GITHUB_REPOSITORY='fixture/snow-apps', GITHUB_OUTPUT=str(output),
+                            SNOW_QT_PREFIX=str(root / 'qt'), QT_CACHE_ARTIFACT='qt-fixture',
+                            VCPKG_CACHE_ARTIFACT='vcpkg-fixture',
+                            CACHE_TEST_LOG=str(root / 'calls'),
+                            PATH=str(root) + os.pathsep + os.environ['PATH'])
+                        if denied:
+                            environment['CACHE_TEST_DENIED'] = '1'
+                        result = subprocess.run(['bash', '-c', command], cwd=ROOT,
+                                                env=environment, text=True, capture_output=True)
+                        self.assertEqual(result.returncode == 0, not denied, result.stderr)
+                        if denied:
+                            self.assertFalse(output.exists())
+                            self.assertIn('API permission denied', result.stderr)
+                        else:
+                            self.assertEqual(output.read_text().strip(), 'hit=false')
 
     def test_only_tags_trigger_the_full_build_on_push(self):
         trigger = self.workflow.split('\npermissions:', 1)[0]

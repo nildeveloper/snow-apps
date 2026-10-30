@@ -31,7 +31,7 @@
    python3 scripts/test-macos13-source-compat.py -v
    python3 scripts/test-macos13-compile-cache.py -v
    python3 scripts/test-macos-build-support.py QtMacOSDeploymentPolicy \
-     MacOSBuildScripts.test_ci_cached_build_cleans_cmake_without_rebuilding_for_packaging -v
+     MacOSBuildScripts.test_ci_cached_build_reuses_only_compiler_outputs_and_packages_once -v
    ```
 
 4. 日常 push 只运行轻量 Preflight，不额外跑完整 smoke。发版时核对源版本、

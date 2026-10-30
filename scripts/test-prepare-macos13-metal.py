@@ -15,6 +15,13 @@ spec.loader.exec_module(prepare_metal)
 
 
 class MetalPreparation(unittest.TestCase):
+    def test_ci_prepares_metal_without_changing_the_shared_build_entry(self):
+        workflow = (ROOT / '.github/workflows/macos13-compat-release.yml').read_text()
+        command = 'python3 scripts/prepare-macos13-metal.py'
+        self.assertEqual(workflow.count(command), 1)
+        self.assertLess(workflow.index(command), workflow.index('name: Build Snow Shot'))
+        self.assertNotIn('prepare-macos13-metal', (ROOT / 'scripts/build.sh').read_text())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='snow metal git fixture ')
         self.addCleanup(self.temp.cleanup)

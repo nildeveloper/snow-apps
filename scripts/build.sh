@@ -29,24 +29,6 @@ fi
 snow_setup_tools
 cd "$snow_repo_root"
 [[ -x .tools/vcpkg/vcpkg ]] || snow_die 'Run scripts/bootstrap-macos.sh first.'
-prepare_metal=0
-if [[ "$snow_arch" == arm64 ]]; then
-    if [[ ${#targets[@]} == 0 ]]; then
-        prepare_metal=1
-    else
-        # Explicit library/format/test targets must not acquire an unrelated
-        # Metal prerequisite. Custom targets that build OCR prepare it explicitly.
-        for target in "${targets[@]}"; do
-            case "$target" in
-                snow_shot|snow_shot_mini|snow_ocr_process|snow_ocr_process_build|snow-all|snow-tests|all|package|install)
-                    prepare_metal=1 ;;
-            esac
-        done
-    fi
-fi
-if [[ "$prepare_metal" == 1 ]]; then
-    python3 "$snow_repo_root/scripts/prepare-macos13-metal.py"
-fi
 if [[ "$skip_bootstrap" == 0 ]]; then
     "$snow_repo_root/scripts/bootstrap-macos.sh" "$snow_preset" --skip-dependency-install
 fi
