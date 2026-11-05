@@ -18,6 +18,7 @@ import tempfile
 
 
 VERSION = '0.29.0'
+ROOT = Path(__file__).resolve().parents[1]
 SHA256 = 'd98372d5524226ccf9dc0eda03d4e4f5826182dabb2fc3f2bd303ed9113a748d'
 URL = ('https://github.com/indygreg/apple-platform-rs/releases/download/'
        f'apple-codesign%2F{VERSION}/apple-codesign-{VERSION}-macos-universal.tar.gz')
@@ -122,7 +123,7 @@ def sign(app, arch, configuration=None):
          '--exclude', '**', app])
     if resources(app, executable) != before:
         raise RuntimeError('Signing changed nested code or resources; refusing to package')
-    run(['/usr/bin/codesign', '--verify', '--deep', '--strict', app])
+    run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '--verbose=4', app])
     requirement = run(['/usr/bin/codesign', '-d', '-r-', app])
     if ('designated =>' not in requirement or 'cdhash' in requirement.lower()
             or 'certificate' not in requirement
@@ -150,6 +151,7 @@ def probe(paths):
             app = root / (name + '.app')
             runtime = app / 'Contents/MacOS'
             runtime.mkdir(parents=True)
+            (app / 'Contents/Resources').mkdir()
             (app / 'Contents/Info.plist').write_bytes(plistlib.dumps({
                 'CFBundleIdentifier': identifier, 'CFBundleExecutable': name,
                 'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1'}))
@@ -157,6 +159,11 @@ def probe(paths):
             shutil.copy2(executable, runtime / 'snow-ocr-process')
             (runtime / 'assets').mkdir()
             (runtime / 'assets/manifest.json').write_text('{"fixture":true}\n')
+            # Use the real deployment layout: data lives in Resources and the
+            # executable-relative path is a directory symlink. rcodesign treats
+            # ordinary files below MacOS as nested code, not generic resources.
+            run([sys.executable, ROOT / 'scripts/snow-shot-macos-ocr.py',
+                 'prepare-bundle', '--app', app])
             sign(app, arch, paths)
     print('Native Full/Mini signing and nested-helper preservation probes passed')
 
@@ -191,7 +198,15 @@ def main():
 
 
 if __name__ == '__main__':
+    redactions = [os.environ.get(name, '') for name in
+                  ('MACOS_SIGNING_P12_BASE64', 'MACOS_SIGNING_P12_PASSWORD')]
     try:
         main()
     except (OSError, ValueError, RuntimeError, KeyError, tarfile.TarError) as error:
-        sys.exit(f'Release signing failed: {error}')
+        message = f'Release signing failed: {error}'
+        for value in sorted(filter(None, redactions), key=len, reverse=True):
+            message = message.replace(value, '***')
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print(f'::error title=Release signing::{escaped}', file=sys.stderr)
+        sys.exit(message)

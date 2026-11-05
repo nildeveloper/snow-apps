@@ -10,6 +10,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -125,6 +126,18 @@ class ReleaseSigning(unittest.TestCase):
             signing.prepare()
         self.assertFalse(list(self.root.glob('snow-release-signing-*')))
 
+    def test_ci_failure_annotation_preserves_diagnostics_without_secret_values(self):
+        environment = dict(os.environ, GITHUB_ACTIONS='true',
+                           MACOS_SIGNING_P12_PASSWORD='incorrect-test-password')
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/sign-macos13-release.py'),
+                                 'prepare'], env=environment, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('::error title=Release signing::Release signing failed: openssl failed',
+                      result.stderr)
+        self.assertNotIn('incorrect-test-password', result.stderr)
+        self.assertNotIn(self.encoded, result.stderr)
+        self.assertFalse(list(self.root.glob('snow-release-signing-*')))
+
     def test_native_probe_failure_cleans_material_before_export(self):
         # prepare() must not expose a broken signing state to later CPack jobs.
         original_run = signing.run
@@ -144,6 +157,41 @@ class ReleaseSigning(unittest.TestCase):
                 signing.prepare()
         self.assertFalse(self.output.exists())
         self.assertFalse(list(self.root.glob('snow-release-signing-*')))
+
+    def test_native_probe_prepares_resources_with_the_production_bundle_layout(self):
+        original_run = signing.run
+        products = []
+
+        def run(args):
+            if Path(args[0]).name == 'xcrun':
+                executable = Path(args[args.index('-o') + 1])
+                executable.write_bytes(b'compiled fixture')
+                executable.chmod(0o755)
+                return ''
+            if Path(args[0]).name == 'codesign':
+                return ''
+            # Exercise the real production resource-staging script. Only the
+            # unavailable Apple compiler/signer are replaced on Linux.
+            return original_run(args)
+
+        def verify_layout(app, arch, paths):
+            runtime = app / 'Contents/MacOS'
+            assets = runtime / 'assets'
+            self.assertTrue(assets.is_symlink(), 'JSON must not be nested code in MacOS')
+            self.assertEqual(assets.readlink(), Path('../Resources/assets'))
+            resource = app / 'Contents/Resources/assets/manifest.json'
+            self.assertEqual(resource.read_bytes(), b'{"fixture":true}\n')
+            self.assertEqual((assets / 'manifest.json').read_bytes(), resource.read_bytes())
+            self.assertEqual((runtime / 'snow-ocr-process').read_bytes(), b'compiled fixture')
+            self.assertTrue(os.access(runtime / 'snow-ocr-process', os.X_OK))
+            products.append(plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleIdentifier'])
+
+        with mock.patch.dict(os.environ, {'SNOW_RELEASE_SIGNING_ARCH': 'arm64'}), \
+                mock.patch.object(signing, 'run', side_effect=run), \
+                mock.patch.object(signing, 'sign', side_effect=verify_layout), \
+                contextlib.redirect_stdout(io.StringIO()):
+            signing.probe({'SNOW_SIGNING_DIRECTORY': self.root})
+        self.assertEqual(products, list(signing.PRODUCTS))
 
     def exercise_signature(self, identifier, mutate_helper=False, bad_requirement=False,
                            rejected_certificate=False):

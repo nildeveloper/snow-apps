@@ -20,6 +20,9 @@ expiration, downloads checksum-pinned rcodesign 0.29.0, and signs tiny native Fu
 and Mini bundles. Apple codesign verifies the architecture-specific probes,
 certificate requirement and preserved nested helper bytes. Missing credentials
 or probe failures stop the release without falling back to ad-hoc signing.
+The probe uses the production `prepare-bundle` resource-staging path, including
+the `MacOS/assets` link to `Resources/assets`; JSON files are not placed in the
+nested-code area. Apple verification errors include verbose resource diagnostics.
 
 CPack's final app-staging hook signs the actual deployment copy after stripping,
 OCR finalization and product-name staging. `--exclude '**'` preserves the nested
