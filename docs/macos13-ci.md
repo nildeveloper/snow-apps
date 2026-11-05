@@ -1,5 +1,47 @@
 # macOS 13 compatibility CI
 
+## Persistent release signatures
+
+Compatibility tag builds require these GitHub **Actions Secrets** (not plaintext
+Actions Variables), using the same names and rcodesign flow as
+[paste-rs](https://github.com/nildeveloper/paste-rs/blob/2b3c7387264f55a25aa5bc634b869777f670e178/.github/workflows/build.yml):
+
+- `MACOS_SIGNING_P12_BASE64`: a single-line base64-encoded PKCS#12 certificate and private key.
+- `MACOS_SIGNING_P12_PASSWORD`: that container's password.
+
+The same certificate may be used for both projects. Repository secrets must be
+configured in this repository too, or provided through an organization secret
+authorized for both repositories. The workflow cannot copy another repository's
+secret values. Keep the certificate/key fixed across releases; certificate
+rotation changes the application's identity for existing privacy grants.
+
+Before the expensive build, the workflow validates the P12 and certificate
+expiration, downloads checksum-pinned rcodesign 0.29.0, and signs tiny native Full
+and Mini bundles. Apple codesign verifies the architecture-specific probes,
+certificate requirement and preserved nested helper bytes. Missing credentials
+or probe failures stop the release without falling back to ad-hoc signing.
+
+CPack's final app-staging hook signs the actual deployment copy after stripping,
+OCR finalization and product-name staging. `--exclude '**'` preserves the nested
+helpers and finalized OCR manifest. Before creating the DMG, signing verifies
+unchanged nested resources, the deep bundle signature, expected Bundle ID and
+certificate fingerprint, and a designated requirement without `cdhash`.
+Only the DMG container is signed after this point. The certificate/password live
+under the runner's temporary directory with restricted permissions, are excluded
+from all caches/artifacts, and are removed by an `always()` cleanup step.
+
+These are certificate-signed apps, not Apple-notarized releases. Switching from
+the old ad-hoc builds can require one new Screen Recording/Accessibility grant.
+Install a later, different build by DMG drag-and-drop using the same certificate
+and verify both capabilities on macOS 13 before claiming permission retention.
+Do not use the local-signing installer when testing this distribution identity;
+that installer intentionally signs with its own local certificate.
+
+Run `python3 scripts/test-sign-macos13-release.py -v` with OpenSSL and CMake for
+focused orchestration tests. Linux tests use real temporary P12 containers and
+simulated Apple signing commands. They do not prove native signature validity
+or TCC permission continuity; the native probe and Mac upgrade check do that.
+
 Pushes to `feature/macos13-compat` and `fix/macos13-*` run the preflight workflow:
 native jthread probes for both architectures, compatibility-policy checks and focused build
 script/cache transport regression checks. Native probes also exercise stop-aware

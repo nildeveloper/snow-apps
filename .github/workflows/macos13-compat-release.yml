@@ -121,6 +121,13 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
+      - name: Prepare fixed release signing identity
+        env:
+          MACOS_SIGNING_P12_BASE64: ${{ secrets.MACOS_SIGNING_P12_BASE64 }}
+          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+          SNOW_RELEASE_SIGNING_ARCH: ${{ matrix.arch }}
+        run: python3 scripts/sign-macos13-release.py prepare
+
       - name: Install build tools
         shell: bash
         run: |
@@ -471,6 +478,9 @@ jobs:
             "-DCMAKE_OBJCXX_FLAGS:STRING=-Xclang -fno-pch-timestamp"
 
       - name: Package existing release binaries
+        env:
+          SNOW_REQUIRE_RELEASE_SIGNATURE: "1"
+          SNOW_RELEASE_SIGNING_ARCH: ${{ matrix.arch }}
         shell: bash
         run: scripts/package-snow-shot.sh "${{ matrix.preset }}" --skip-build
 
@@ -550,6 +560,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Remove temporary signing material
+        if: always()
+        run: python3 scripts/sign-macos13-release.py cleanup
+
   release:
     name: Publish compatibility release
     if: needs.validate.outputs.publish == 'true'
@@ -616,7 +630,8 @@ jobs:
           - Tag: ${RELEASE_TAG}
           - Minimum supported system: macOS 13
           - Architectures: Apple Silicon (arm64) and Intel (x86_64)
-          - Packages are ad-hoc signed by the build pipeline and are not Apple-notarized.
+          - Apps are signed with a persistent certificate by the build pipeline and are not Apple-notarized.
+          - The first upgrade from an ad-hoc build can require privacy consent again. Permission continuity needs validation on macOS 13.
           - Automatic upstream updates remain disabled in this compatibility build.
           - CI builds on macOS 15 with a macOS 13 deployment target; physical Ventura capture, mixed-DPI and display hot-plug behavior are not validated by these builds.
 

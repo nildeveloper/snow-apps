@@ -9,3 +9,13 @@ if(NOT EXISTS "${_snow_staged_app}/Contents/Info.plist")
     message(FATAL_ERROR "The staged Snow Shot application is missing: ${_snow_staged_app}")
 endif()
 file(RENAME "${_snow_staged_app}" "${CPACK_TEMPORARY_DIRECTORY}/${CPACK_SNOW_SHOT_PRODUCT_NAME}.app")
+
+# Deployment, stripping and OCR finalization have completed. Compatibility CI
+# optionally signs the final app before DMG creation; no app mutation follows.
+if("$ENV{SNOW_REQUIRE_RELEASE_SIGNATURE}" STREQUAL "1")
+    execute_process(COMMAND /usr/bin/env python3
+        "${CMAKE_CURRENT_LIST_DIR}/../scripts/sign-macos13-release.py" sign
+        --app "${CPACK_TEMPORARY_DIRECTORY}/${CPACK_SNOW_SHOT_PRODUCT_NAME}.app"
+        --arch "$ENV{SNOW_RELEASE_SIGNING_ARCH}"
+        COMMAND_ERROR_IS_FATAL ANY)
+endif()
