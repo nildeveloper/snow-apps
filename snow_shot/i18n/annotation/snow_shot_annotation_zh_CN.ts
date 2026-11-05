@@ -2,6 +2,25 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
     <context>
+        <name>ScreenshotQuickTextAnnotationToolbar</name>
+        <message>
+            <source>Highlight</source>
+            <translation>高亮</translation>
+        </message>
+        <message>
+            <source>Strikethrough</source>
+            <translation>删除线</translation>
+        </message>
+        <message>
+            <source>Underline</source>
+            <translation>下划线</translation>
+        </message>
+        <message>
+            <source>Wavy Underline</source>
+            <translation>波浪下划线</translation>
+        </message>
+    </context>
+    <context>
         <name>ScreenshotToolPalette</name>
         <message>
             <source>%1 (unavailable)</source>
@@ -292,6 +311,10 @@
             <translation>连接类型</translation>
         </message>
         <message>
+            <source>Control keys</source>
+            <translation>控制键</translation>
+        </message>
+        <message>
             <source>Convert to HTML</source>
             <translation>转换为 HTML</translation>
         </message>
@@ -388,8 +411,8 @@
             <translation>当前水印字体大小</translation>
         </message>
         <message>
-            <source>Cursor data is unavailable for this screenshot.</source>
-            <translation>此截图没有可用的光标数据。</translation>
+            <source>Cursor data is unavailable for this screenshot</source>
+            <translation>此截图没有可用的光标数据</translation>
         </message>
         <message>
             <source>Curve region</source>
@@ -440,8 +463,8 @@
             <translation>删除标注模板</translation>
         </message>
         <message>
-            <source>Delete annotation template "%1"? This action cannot be undone.</source>
-            <translation>删除标注模板“%1”？此操作无法撤销。</translation>
+            <source>Delete annotation template "%1"? This action cannot be undone</source>
+            <translation>删除标注模板“%1”？此操作无法撤销</translation>
         </message>
         <message>
             <source>Delete selected elements</source>
@@ -788,6 +811,10 @@
             <translation>引导线箭头样式</translation>
         </message>
         <message>
+            <source>Letters and symbols</source>
+            <translation>字母和符号</translation>
+        </message>
+        <message>
             <source>Line</source>
             <translation>直线</translation>
         </message>
@@ -920,6 +947,10 @@
             <translation>无</translation>
         </message>
         <message>
+            <source>Number keys</source>
+            <translation>数字键</translation>
+        </message>
+        <message>
             <source>Opacity</source>
             <translation>不透明度</translation>
         </message>
@@ -1010,6 +1041,10 @@
         <message>
             <source>Post-processing effects</source>
             <translation>后处理效果</translation>
+        </message>
+        <message>
+            <source>Preserve keyboard shortcuts</source>
+            <translation>保留键盘快捷键</translation>
         </message>
         <message>
             <source>Pressure-sensitive brush</source>
@@ -1408,8 +1443,8 @@
             <translation>渐宽箭杆</translation>
         </message>
         <message>
-            <source>Tapered shafts support standard, triangle, triangle outline, and indented triangle arrowheads.</source>
-            <translation>渐宽箭杆支持标准、三角形、空心三角形和内凹三角形箭头。</translation>
+            <source>Tapered shafts support standard, triangle, triangle outline, and indented triangle arrowheads</source>
+            <translation>渐宽箭杆支持标准、三角形、空心三角形和内凹三角形箭头</translation>
         </message>
         <message>
             <source>Target Language</source>
@@ -1506,6 +1541,10 @@
         <message>
             <source>Thought Bubble</source>
             <translation>思考气泡</translation>
+        </message>
+        <message>
+            <source>Translation service</source>
+            <translation>翻译服务</translation>
         </message>
         <message>
             <source>Translation settings</source>
@@ -1644,16 +1683,16 @@
     <context>
         <name>snow_shot::presentation::GlobalCanvasController</name>
         <message>
-            <source>Could not change canvas click-through.</source>
-            <translation>无法切换画布的鼠标穿透状态。</translation>
+            <source>Could not change canvas click-through</source>
+            <translation>无法切换画布的鼠标穿透状态</translation>
         </message>
         <message>
             <source>Could not show the laser pointer: %1</source>
             <translation>无法显示激光笔：%1</translation>
         </message>
         <message>
-            <source>The laser pointer is unavailable.</source>
-            <translation>激光笔不可用。</translation>
+            <source>The laser pointer is unavailable</source>
+            <translation>激光笔不可用</translation>
         </message>
     </context>
 </TS>

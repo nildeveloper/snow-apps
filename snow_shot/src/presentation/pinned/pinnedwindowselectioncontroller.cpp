@@ -23,6 +23,9 @@ namespace {
     QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController",
                       "Image Stitching"),
     QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController",
+                      "Copy Files to Clipboard"),
+    QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController", "Save as File"),
+    QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController",
                       "Close Other Windows"),
     QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController", "Align Position"),
     QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController", "Group"),
@@ -190,6 +193,49 @@ void PinnedWindowSelectionController::selectAll(
     notifySelectionChanged();
 }
 
+void PinnedWindowSelectionController::stitchWindows(
+    const QList<QPointer<ScreenshotPinnedWindow>>& targets) {
+    if (targets.isEmpty())
+        return;
+    struct Capture {
+        QVector<ScreenshotPinnedImageSnapshot> snapshots;
+        qsizetype remaining;
+    };
+    auto capture = std::make_shared<Capture>(
+        Capture{QVector<ScreenshotPinnedImageSnapshot>(targets.size()), targets.size()});
+    QVector<quint64> generations(targets.size());
+    for (qsizetype index = 0; index < targets.size(); ++index) {
+        if (targets[index]) {
+            capture->snapshots[index].label = targets[index]->persistenceId();
+            generations[index] = targets[index]->m_presentationGeneration;
+        }
+    }
+    const QPointer<PinnedWindowSelectionController> guard(this);
+    for (qsizetype index = 0; index < targets.size(); ++index) {
+        if (!guard)
+            return;
+        const auto complete = [guard, capture, index](ScreenshotPinnedImageSnapshot snapshot) {
+            if (!guard)
+                return;
+            if (snapshot.label.isEmpty())
+                snapshot.label = capture->snapshots[index].label;
+            capture->snapshots[index] = std::move(snapshot);
+            if (--capture->remaining == 0)
+                emit guard->imageStitchingRequested(capture->snapshots);
+        };
+        if (!targets[index] || targets[index]->m_closing ||
+            targets[index]->persistenceId() != capture->snapshots[index].label ||
+            targets[index]->m_presentationGeneration != generations[index]) {
+            auto failed = capture->snapshots[index];
+            failed.error = QCoreApplication::translate("ScreenshotPinnedWindow",
+                                                       "The pinned image could not be prepared");
+            complete(std::move(failed));
+        } else {
+            targets[index]->requestRenderedImageSnapshot(complete);
+        }
+    }
+}
+
 void PinnedWindowSelectionController::destroyWindows(
     ScreenshotPinnedWindow* owner, const QList<QPointer<ScreenshotPinnedWindow>>& targets) {
     if (owner && !targets.isEmpty())
@@ -247,14 +293,29 @@ void PinnedWindowSelectionController::buildContextMenu(ScreenshotPinnedWindow* o
         add("Image Stitching", QStringLiteral("screenshotPinnedSelectionImageStitching"),
             customIcons::ImageStitching());
     connect(stitching, &QAction::triggered, this, [this, targets, valid] {
-        if (!valid())
-            return;
-        QVector<ScreenshotPinnedImageSnapshot> snapshots;
-        snapshots.reserve(targets.size());
-        for (const auto& window : targets)
-            snapshots.append(window->stitchingSnapshot());
-        emit imageStitchingRequested(snapshots);
+        if (valid())
+            stitchWindows(targets);
     });
+    auto* copy =
+        add("Copy Files to Clipboard",
+            QStringLiteral("screenshotPinnedSelectionCopyFilesToClipboard"), outlined::Copy());
+    connect(copy, &QAction::triggered, this, [owner, targets, valid] {
+        if (valid() && !ScreenshotPinnedWindow::batchSavePending())
+            owner->copyPinnedWindowFiles(targets);
+    });
+    auto* save = add("Save as File", QStringLiteral("screenshotPinnedSelectionSaveAsFile"),
+                     customIcons::Save());
+    connect(save, &QAction::triggered, this, [owner, targets, valid] {
+        if (valid() && !ScreenshotPinnedWindow::batchSavePending())
+            owner->savePinnedWindows(targets, true);
+    });
+    const auto refreshExports = [copy, save, valid] {
+        const bool enabled = valid() && !ScreenshotPinnedWindow::batchSavePending();
+        copy->setEnabled(enabled);
+        save->setEnabled(enabled);
+    };
+    connect(menu, &QMenu::aboutToShow, this, refreshExports);
+    refreshExports();
     menu->addSeparator();
     auto* closeOthers =
         add("Close Other Windows", QStringLiteral("screenshotPinnedSelectionCloseOthers"),
@@ -330,8 +391,8 @@ void PinnedWindowSelectionController::buildContextMenu(ScreenshotPinnedWindow* o
             connect(action, &QAction::triggered, this,
                     [this, manager, targets, valid, id = entry.id, owner = QPointer(owner)] {
                         if (valid() && manager && !manager->moveWindows(targets, id))
-                            showFailure(
-                                owner, tr("The selected windows could not be moved to the group."));
+                            showFailure(owner,
+                                        tr("The selected windows could not be moved to the group"));
                     });
         }
         group->addSeparator();
@@ -416,8 +477,8 @@ void PinnedWindowSelectionController::confirmDestroy(
         if (m_destroyRecords) {
             const auto result = m_destroyRecords(ids);
             if (!result.success) {
-                showFailure(owner, displayed ? tr("The displayed windows could not be destroyed.")
-                                             : tr("The selected windows could not be destroyed."));
+                showFailure(owner, displayed ? tr("The displayed windows could not be destroyed")
+                                             : tr("The selected windows could not be destroyed"));
                 return;
             }
         }
@@ -472,10 +533,10 @@ void PinnedWindowSelectionController::retranslateUi() {
         m_destroyConfirmation->setWindowTitle(displayed ? tr("Destroy displayed windows")
                                                         : tr("Destroy selected windows"));
         m_destroyConfirmation->setText(
-            displayed ? tr("Destroy %n displayed window(s)? This action cannot be undone.", nullptr,
-                           count)
-                      : tr("Destroy %n selected window(s)? This action cannot be undone.", nullptr,
-                           count));
+            displayed
+                ? tr("Destroy %n displayed window(s)? This action cannot be undone", nullptr, count)
+                : tr("Destroy %n selected window(s)? This action cannot be undone", nullptr,
+                     count));
         m_destroyConfirmation->setAcceptText(tr("Destroy"));
         m_destroyConfirmation->setRejectText(tr("Cancel"));
     }

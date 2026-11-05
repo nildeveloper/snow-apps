@@ -235,6 +235,8 @@ class GlobalShortcutSettings final {
   public:
     [[nodiscard]] bool disableOnFocusedFullscreenWindow() const;
     bool setDisableOnFocusedFullscreenWindow(bool disabled) const;
+    [[nodiscard]] QString fullscreenWindowFilter() const;
+    bool setFullscreenWindowFilter(const QString& filter) const;
 };
 
 class ScreenshotSettings final {
@@ -556,6 +558,14 @@ class RecordingSettings final {
     bool setWebcamOrientation(int orientation) const;
     [[nodiscard]] bool showKeyboard() const;
     bool setShowKeyboard(bool show) const;
+    [[nodiscard]] bool recordNumberKeys() const;
+    bool setRecordNumberKeys(bool enabled) const;
+    [[nodiscard]] bool recordLettersAndSymbols() const;
+    bool setRecordLettersAndSymbols(bool enabled) const;
+    [[nodiscard]] bool recordControlKeys() const;
+    bool setRecordControlKeys(bool enabled) const;
+    [[nodiscard]] bool preserveKeyboardShortcuts() const;
+    bool setPreserveKeyboardShortcuts(bool enabled) const;
     [[nodiscard]] bool mouseHighlightEnabled() const;
     bool setMouseHighlightEnabled(bool enabled) const;
     [[nodiscard]] bool recordMouseClicks() const;
@@ -704,6 +714,8 @@ class PinToScreenSettings final {
     bool setDuplicateContentAction(const QString& value) const;
     [[nodiscard]] QString textSelectionOnRecognitionResults() const;
     [[nodiscard]] bool setTextSelectionOnRecognitionResults(const QString& mode) const;
+    [[nodiscard]] bool quickAnnotationForSelectedText() const;
+    bool setQuickAnnotationForSelectedText(bool enabled) const;
     [[nodiscard]] bool automaticTextRecognition() const;
     bool setAutomaticTextRecognition(bool enabled) const;
     [[nodiscard]] bool autoResizeWindow() const;

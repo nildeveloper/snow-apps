@@ -70,6 +70,7 @@ void ScreenshotCaptureWorkflow::startCapture(StartMode mode, ToolbarPreparation 
                                              PresentationMode presentation) {
     if (m_captureSuspended)
         return;
+    m_context.captureStarting(presentation == PresentationMode::Visible);
     const QPoint initialCursorGlobalPosition = m_context.cursorPosition();
     completeRecapture(false);
     if (m_deferredExportCleanup) {
@@ -107,9 +108,9 @@ void ScreenshotCaptureWorkflow::startCapture(StartMode mode, ToolbarPreparation 
     m_captureModelsClean = false;
     m_context.restoreSelectionPreferences();
     m_context.interaction.beginCapture();
-    m_context.intelligentSelection.beginCaptureSession(mode != StartMode::ExternalDrag &&
-                                                           m_context.smartSelectionEnabled(),
-                                                       m_context.preferredSelectionTarget());
+    m_context.intelligentSelection.beginCaptureSession(mode == StartMode::ExternalDrag
+                                                           ? snow_shot::SmartSelectionMode::Disabled
+                                                           : m_context.smartSelectionMode());
     *m_startup = {};
     m_startup->sessionId = sessionId;
     m_startup->invocationLogicalPosition = initialCursorGlobalPosition;
@@ -161,7 +162,8 @@ void ScreenshotCaptureWorkflow::handleInitialSmartSelectionResolved(quint64 sess
     showCapturePresentationWhenReady(sessionId);
 }
 
-void ScreenshotCaptureWorkflow::cancelCapture() {
+void ScreenshotCaptureWorkflow::cancelCapture(ScreenshotCaptureFocusDisposition focus) {
+    m_context.captureEnding(focus);
     const bool refreshAfterCancel = m_refreshAfterCapture || m_state.layoutDirty;
     SNOW_SHOT_CAPTURE_PERF_MILESTONE("workflow.cancel_requested");
     SNOW_SHOT_CAPTURE_PERF_FINISH(false);
@@ -180,12 +182,14 @@ void ScreenshotCaptureWorkflow::cancelCapture() {
     resetCaptureModels();
     resetCanvasRuntimeState();
     finishCaptureSession();
+    m_context.captureEnded();
     if (refreshAfterCancel) {
         scheduleLayoutRefresh(m_layoutChangeSerial);
     }
 }
 
 void ScreenshotCaptureWorkflow::cancelCaptureForExport() {
+    m_context.captureEnding(ScreenshotCaptureFocusDisposition::KeepCurrent);
     *m_startup = {};
     SNOW_SHOT_PIN_PERF_SCOPE("cleanup.cancel_capture_for_export");
     SNOW_SHOT_CAPTURE_PERF_MILESTONE("workflow.export_cancel_requested");
@@ -205,6 +209,7 @@ void ScreenshotCaptureWorkflow::cancelCaptureForExport() {
     m_refreshAfterCapture = false;
     resetCaptureModels();
     finishCaptureSession(true);
+    m_context.captureEnded();
 }
 
 void ScreenshotCaptureWorkflow::clearCapturePresentationReadiness() {
@@ -643,14 +648,17 @@ void ScreenshotCaptureWorkflow::showCapturePresentationWhenReady(quint64 session
     }
     if (!m_state.presentationSuppressed &&
         m_context.selection.regionType() == ScreenshotRegionType::Rectangle &&
-        m_startMode != StartMode::ExternalDrag && !m_context.runtime.selectorReady() &&
-        !m_context.runtime.selectorRefreshInFlight()) {
+        m_startMode != StartMode::ExternalDrag &&
+        m_context.intelligentSelection.smartSelectionEnabled() &&
+        !m_context.runtime.selectorReady() && !m_context.runtime.selectorRefreshInFlight()) {
         m_context.runtime.startWorkflowRefresh();
     }
 }
 
 void ScreenshotCaptureWorkflow::enterOverlaySelectionModeAtCursor() {
-    if (m_state.presentationSuppressed) {
+    if (m_state.presentationSuppressed ||
+        (m_startMode != StartMode::ExternalDrag &&
+         !m_context.intelligentSelection.smartSelectionEnabled())) {
         m_context.interaction.enterOverlayVisible(false);
         m_context.intelligentSelection.clearTransientState();
         m_context.runtime.clearSelectorSelection();
@@ -754,6 +762,7 @@ void ScreenshotCaptureWorkflow::handleLayoutReady(const ScreenshotCaptureLayout&
     if (!m_state.presentationSuppressed)
         m_context.runtime.prepareColorPickerSurface(m_context.displaySession);
     if (!m_state.presentationSuppressed && m_startMode != StartMode::ExternalDrag &&
+        m_context.intelligentSelection.smartSelectionEnabled() &&
         m_context.selection.regionType() == ScreenshotRegionType::Rectangle)
         m_context.runtime.startWorkflowRefresh();
     if (beginCapturePresentation(layout.requestId)) {

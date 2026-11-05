@@ -140,7 +140,9 @@ void selectorCoordinatorSnapshotsDoNotRetainCapturePixels() {
 
 void smartSelectionChangesPreserveActiveFrozenGeometry() {
     auto& applicationStorage = storage::ApplicationStorage::instance();
-    require(applicationStorage.requestSmartSelection(true), "failed to enable smart selection");
+    require(applicationStorage.requestSmartSelectionMode(
+                snow_shot::SmartSelectionMode::WindowSubElement),
+            "failed to enable smart selection");
     ScreenshotSelectorCoordinator coordinator;
     CapturedDisplayModel display;
     display.physicalRect = QRect(-200, 40, 400, 300);
@@ -154,7 +156,7 @@ void smartSelectionChangesPreserveActiveFrozenGeometry() {
         if (!refreshInFlight)
             QCoreApplication::sendPostedEvents();
         const int previousRefreshed = refreshed;
-        require(applicationStorage.requestSmartSelection(false),
+        require(applicationStorage.requestSmartSelectionMode(snow_shot::SmartSelectionMode::Window),
                 "failed to change active smart selection");
         require(refreshed == previousRefreshed + 1 && currentExclusions == exclusions &&
                     currentDisplays.size() == 1 && currentDisplays.first().display_id == 17 &&
@@ -171,12 +173,74 @@ void smartSelectionChangesPreserveActiveFrozenGeometry() {
         else
             coordinator.destroyService();
         const int idleRefreshed = refreshed;
-        require(applicationStorage.requestSmartSelection(true),
+        require(applicationStorage.requestSmartSelectionMode(
+                    snow_shot::SmartSelectionMode::WindowSubElement),
                 "failed to restore smart selection while idle");
         require(refreshed == idleRefreshed && !coordinator.ready() &&
                     !coordinator.refreshInFlight(),
                 "configuration changes after release must not revive a completed capture");
     }
+}
+
+void smartSelectionModesPersistAndDisablePendingLookup(const QString& configurationPath) {
+    using snow_shot::SmartSelectionMode;
+    snow_shot::presentation::GlobalShortcutManager shortcuts;
+    settings::BuiltInSettingsBackend backend(shortcuts);
+    constexpr auto binding = settings::SettingsSelectBinding::SmartSelection;
+    auto& app = storage::ApplicationStorage::instance();
+    require(backend.selectValue(binding) == QStringLiteral("window_sub_element"),
+            "smart selection select must default to sub-elements");
+    int synchronized = 0;
+    QObject::connect(&backend, &settings::BuiltInSettingsBackend::synchronized, &backend,
+                     [&] { ++synchronized; });
+    for (const auto& id : {QStringLiteral("window"), QStringLiteral("disabled"),
+                           QStringLiteral("window_sub_element")}) {
+        const int before = synchronized;
+        require(backend.applySelectValue(binding, id) && backend.selectValue(binding) == id &&
+                    synchronized > before && app.flushNow().success,
+                "select changes must persist and synchronize");
+        storage::ConfigurationStore reloaded(configurationPath, true, true, 60000);
+        require(reloaded.value(QStringLiteral("screenshot_selection/smart_selection")) == id,
+                "smart selection select must survive reload");
+    }
+    require(!backend.applySelectValue(binding, QStringLiteral("invalid")) &&
+                backend.selectValue(binding) == QStringLiteral("window_sub_element"),
+            "invalid mode changes must preserve the previous value");
+    ScreenshotSelectorCoordinator coordinator;
+    int results = 0;
+    QObject::connect(&coordinator, &ScreenshotSelectorCoordinator::initialResultReady, &coordinator,
+                     [&] { ++results; });
+    require(coordinator.startRefresh({}), "selector must refresh when enabled");
+    QCoreApplication::sendPostedEvents();
+    require(
+        coordinator.requestHitTest(QPoint(10, 20), ScreenshotSelectorHitTestMode::WindowSubElement),
+        "initial lookup must be accepted");
+    const int refreshes = refreshed;
+    require(backend.applySelectValue(binding, QStringLiteral("disabled")), "disable lookup");
+    QCoreApplication::sendPostedEvents();
+    require(results == 0 && refreshed == refreshes && !coordinator.ready() &&
+                !coordinator.refreshInFlight() && !coordinator.hitTestInFlight() &&
+                !coordinator.startRefresh({}) &&
+                !coordinator.requestHitTest(QPoint(10, 20), ScreenshotSelectorHitTestMode::Window),
+            "Disabled must discard queued results and reject all automatic lookup");
+    require(backend.resetSection(settings::SettingsSectionReset::ScreenshotSettings) &&
+                app.smartSelectionMode() == SmartSelectionMode::WindowSubElement,
+            "screenshot reset must restore the default mode");
+    // A per-request MCP override must work even when the saved mode is Disabled.
+    require(backend.applySelectValue(binding, QStringLiteral("disabled")), "set saved manual mode");
+    {
+        ScreenshotSelectorCoordinator overridden(nullptr, {},
+                                                 [] { return SmartSelectionMode::Window; });
+        require(overridden.startRefresh({}), "per-request override must enable window lookup");
+        QCoreApplication::sendPostedEvents();
+        require(overridden.requestHitTest(QPoint(10, 20),
+                                          ScreenshotSelectorHitTestMode::WindowSubElement) &&
+                    currentMode == SNOW_UI_SELECTOR_HIT_TEST_MODE_WINDOW,
+                "Window must constrain stale sub-element requests under an override");
+        overridden.releaseCache();
+    }
+    require(backend.resetSection(settings::SettingsSectionReset::ScreenshotSettings),
+            "restore default mode");
 }
 
 void settingsPersistAndResetToUia(const QString& configurationPath) {
@@ -336,8 +400,13 @@ void recordingApiModePersistsAndResets(const QString& configurationPath) {
     snow_shot::presentation::GlobalShortcutManager shortcuts;
     settings::BuiltInSettingsBackend backend(shortcuts);
     constexpr auto binding = settings::SettingsSelectBinding::ScreenRecordingApiMode;
-    require(backend.selectValue(binding) == QStringLiteral("dxgi"),
-            "recording API must default to DXGI");
+#ifdef Q_OS_WIN
+    const auto defaultMode = QStringLiteral("wgc");
+#else
+    const auto defaultMode = QStringLiteral("dxgi");
+#endif
+    require(backend.selectValue(binding) == defaultMode,
+            "recording API must use the platform default");
     const QString screenshotApi = storage::ScreenshotSettings().apiMode();
     for (const auto& mode :
          {QStringLiteral("dxgi"), QStringLiteral("wgc"), QStringLiteral("gdi")}) {
@@ -364,8 +433,8 @@ void recordingApiModePersistsAndResets(const QString& configurationPath) {
                 backend.selectValue(binding) == QStringLiteral("gdi"),
             "screenshot settings reset must preserve recording API");
     require(backend.resetSection(settings::SettingsSectionReset::ScreenRecordingCapture) &&
-                backend.selectValue(binding) == QStringLiteral("dxgi"),
-            "system recording settings reset must restore DXGI");
+                backend.selectValue(binding) == defaultMode,
+            "system recording settings reset must restore the platform default");
 }
 
 void ownUiCapturePreferencesPersistAndReset() {
@@ -544,15 +613,17 @@ void changedApiRefreshesServiceAndRejectsOldResults() {
     QCoreApplication::sendPostedEvents();
     require(hitResults == 1, "new API results must reach the coordinator");
 
-    require(storage::ApplicationStorage::instance().requestSmartSelection(false),
+    require(storage::ApplicationStorage::instance().requestSmartSelectionMode(
+                snow_shot::SmartSelectionMode::Window),
             "failed to disable smart selection");
     QCoreApplication::sendPostedEvents();
     require(coordinator.requestHitTest(QPoint(10, 20),
                                        ScreenshotSelectorHitTestMode::WindowSubElement) &&
                 currentMode == SNOW_UI_SELECTOR_HIT_TEST_MODE_WINDOW,
-            "disabled smart selection must still use window-only lookup");
+            "Window mode must constrain stale sub-element requests to window-only lookup");
     QCoreApplication::sendPostedEvents();
-    require(storage::ApplicationStorage::instance().requestSmartSelection(true),
+    require(storage::ApplicationStorage::instance().requestSmartSelectionMode(
+                snow_shot::SmartSelectionMode::WindowSubElement),
             "failed to restore smart selection");
 }
 
@@ -1054,6 +1125,17 @@ int main(int argc, char** argv) {
     static_cast<void>(
         applicationStorage.initialize({temporary.filePath(QStringLiteral("bin")),
                                        temporary.filePath(QStringLiteral("data")), 60000}));
+    if (application.arguments().contains(QStringLiteral("--recording-api-only"))) {
+        recordingApiModePersistsAndResets(temporary.filePath(QStringLiteral("data/config.json")));
+        applicationStorage.shutdown();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--smart-selection-only"))) {
+        smartSelectionModesPersistAndDisablePendingLookup(
+            temporary.filePath(QStringLiteral("data/config.json")));
+        applicationStorage.shutdown();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--toolbar-layout-only"))) {
         toolbarLayoutSectionResetsRemainIndependent();
         applicationStorage.shutdown();
@@ -1087,6 +1169,8 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (!selectorOnly) {
+        smartSelectionModesPersistAndDisablePendingLookup(
+            temporary.filePath(QStringLiteral("data/config.json")));
         recordingApiModePersistsAndResets(temporary.filePath(QStringLiteral("data/config.json")));
         settingsPersistAndResetToUia(temporary.filePath(QStringLiteral("data/config.json")));
         shutterSoundSettingsPersistAndReset(temporary.filePath(QStringLiteral("data/config.json")));

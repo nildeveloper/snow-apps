@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "snow_shot/presentation/imageeditingwindow.h"
+#include "snow_shot/presentation/screenshotpinnedrenderpreparation.h"
 #include "snow_shot/presentation/canvasdrawingpreferences.h"
 #include "imageeditingexportcontroller.h"
 #include "snow_shot/presentation/imageeditingcanvas.h"
@@ -470,7 +471,7 @@ struct ImageEditingWindow::Impl {
             message(ImageEditingWindow::tr("Loading image…"), AdMessage::Type::Loading);
             break;
         case Notice::LoadError:
-            message(ImageEditingWindow::tr("The image could not be loaded."));
+            message(ImageEditingWindow::tr("The image could not be loaded"));
             break;
         case Notice::Exporting:
             message(ImageEditingWindow::tr("Exporting…"), AdMessage::Type::Loading);
@@ -754,6 +755,8 @@ struct ImageEditingWindow::Impl {
                 continue;
             }
             const auto retired = it->controller;
+            if (retired)
+                retired->retireContentAttachment();
             it = sessions.erase(it);
             if (retired) {
                 if (session == retired)
@@ -774,7 +777,7 @@ struct ImageEditingWindow::Impl {
     void exportContent(ExportOperation operation);
     void translateConfirmation() {
         confirmation->setWindowTitle(ImageEditingWindow::tr("Discard Changes?"));
-        confirmation->setText(ImageEditingWindow::tr("This editing window has unsaved changes."));
+        confirmation->setText(ImageEditingWindow::tr("This editing window has unsaved changes"));
         confirmation->setAcceptText(ImageEditingWindow::tr("Discard Changes"));
         confirmation->setRejectText(ImageEditingWindow::tr("Continue Editing"));
     }
@@ -786,13 +789,13 @@ ScreenshotRecognitionWindow* ImageEditingWindow::Impl::ensureRecognitionView() {
         actions.handleCancel = [this] { drawing(ImageEditingCanvas::Mode::Pan); };
         actions.handleCopy = [this] { exportContent(ExportOperation::Copy); };
         actions.handleTextEdited = [this](const QString& text) {
-            if (session)
+            if (session && session->ownsContentAttachment())
                 session->setTextDraft(text);
         };
         actions.handleUndoTextEdit = [this] { undo(false); };
         actions.handleRedoTextEdit = [this] { undo(true); };
         actions.handleTableCommandStateChanged = [this](const auto& state) {
-            if (session)
+            if (session && session->ownsContentAttachment())
                 session->handleTableCommandState(state);
         };
         recognitionView = new ScreenshotRecognitionWindow(
@@ -826,11 +829,14 @@ Session* ImageEditingWindow::Impl::ensureSession() {
         return session;
     }
     ScreenshotRecognitionSessionActions actions;
+    const auto owner = std::make_shared<QPointer<Session>>();
+    actions.isCurrentSession = [this, owner] { return *owner && session == *owner; };
     actions.ensureContent = [this] { return ensureRecognitionView(); };
     actions.applyOcrPresentation = [](auto) {};
     actions.applyOcrBackground = [](auto) {};
     actions.applyFormattedText = [this](auto doc) {
-        ensureRecognitionView()->showFormattedText(std::move(doc));
+        if (recognitionView && session && session->ownsContentAttachment())
+            recognitionView->showFormattedText(std::move(doc));
     };
     actions.clearOcrBackground = [] {};
     actions.setRecognitionVisualState = [this](bool active) {
@@ -892,6 +898,10 @@ Session* ImageEditingWindow::Impl::ensureSession() {
     actions.setTextTargetLanguage = [this](const QString& text) {
         palette->setTextTargetLanguage(text);
     };
+    actions.setTextTranslationServices = [this](const QVector<SnowShotChatModel>& models,
+                                                const QString& selection, bool modelsLoading) {
+        palette->setTextTranslationServices(models, selection, modelsLoading);
+    };
     actions.setShowOriginalImage = [this](bool) {
         palette->setShowOriginalImage(false);
         palette->setOriginalImageToggleEnabled(false);
@@ -907,6 +917,7 @@ Session* ImageEditingWindow::Impl::ensureSession() {
     };
     session = new Session(providers.recognition, providers.qrRecognition,
                           providers.tableRecognition, std::move(actions), &q);
+    *owner = session;
     session->setIndependentEditing(true);
     session->setTarget(
         {QStringLiteral("image-editing:%1:%2").arg(quintptr(&q)).arg(document.baseState()),
@@ -988,6 +999,7 @@ void ImageEditingWindow::Impl::bindRecognition() {
     SESSION_ACTION(textTranslateRequested, beginTextTranslation);
     SESSION_ACTION(textResetRequested, resetTextEditing);
     SESSION_ACTION(textSettingsRequested, openTranslationSettings);
+    SESSION_ACTION(textTranslationServicesRequested, requestTextTranslationServices);
     SESSION_ACTION(imageConversionSettingsRequested, openImageConversionSettings);
 #undef SESSION_ACTION
 #define SESSION_VALUE(signal, method)                                                              \
@@ -998,6 +1010,7 @@ void ImageEditingWindow::Impl::bindRecognition() {
     SESSION_VALUE(textFormattingRequested, applyTextFormatting);
     SESSION_VALUE(textPunctuationRequested, applyTextPunctuation);
     SESSION_VALUE(textTargetLanguageRequested, applyTextTargetLanguage);
+    SESSION_VALUE(textTranslationServiceRequested, applyTextTranslationService);
     SESSION_VALUE(recognitionModelChanged, setRecognitionModel);
 #undef SESSION_VALUE
     palette->setOriginalImageToggleEnabled(false);
@@ -1038,7 +1051,7 @@ void ImageEditingWindow::Impl::exportContent(ExportOperation operation) {
     if (recognition && operation == ExportOperation::Copy) {
         auto mime = recognition->recognitionClipboardMimeData();
         if (!mime) {
-            finish(false, ImageEditingWindow::tr("No recognition result is available to export."));
+            finish(false, ImageEditingWindow::tr("No recognition result is available to export"));
             return;
         }
         content = std::move(mime);
@@ -1055,7 +1068,7 @@ void ImageEditingWindow::Impl::exportContent(ExportOperation operation) {
 #endif
             {
                 finish(false,
-                       ImageEditingWindow::tr("No recognition result is available to export."));
+                       ImageEditingWindow::tr("No recognition result is available to export"));
                 return;
             }
         }
@@ -1111,6 +1124,30 @@ void ImageEditingWindow::present(ImageEditingSource source) {
         if (d.loadJob.isValid())
             return;
     }
+    if (!source.textAnnotations.empty() && source.error.isEmpty()) {
+        d.setLoading(true);
+        auto result = std::make_shared<ImageEditingSource>(std::move(source));
+        d.loadJob = ScreenshotExportCoordinator::shared().submit(
+            this, ScreenshotExportCoordinator::Priority::Foreground,
+            [result](const auto& cancel) {
+                if (!cancel.isCancellationRequested()) {
+                    result->image = renderScreenshotTextAnnotations(
+                        result->image, result->canvasRect, result->textAnnotations);
+                    if (result->image.isNull())
+                        result->error = ImageEditingWindow::tr("The image could not be loaded");
+                    result->textAnnotations = {};
+                }
+                return ScreenshotExportTaskResult{};
+            },
+            [this, result, generation](auto) {
+                if (!m_impl->closing && m_impl->loadGeneration == generation)
+                    present(std::move(*result));
+            });
+        if (d.loadJob.isValid())
+            return;
+        source = std::move(*result);
+        source.error = tr("The image could not be loaded");
+    }
     if (source.resultStyle && source.error.isEmpty()) {
         d.setLoading(true);
         d.loadArtifact =
@@ -1123,14 +1160,14 @@ void ImageEditingWindow::present(ImageEditingSource source) {
                 present(completeImageEditingComposite(std::move(source), std::move(result.image)));
             }))
             return;
-        source.error = tr("The image could not be loaded.");
+        source.error = tr("The image could not be loaded");
     }
     d.setLoading(false);
     d.show();
     if (!source.error.isEmpty() || !d.document.load(source)) {
-        if (source.error.isEmpty() || source.error == tr("The image could not be loaded.") ||
+        if (source.error.isEmpty() || source.error == tr("The image could not be loaded") ||
             source.error ==
-                QCoreApplication::translate("ImageEditingWindow", "The image could not be loaded."))
+                QCoreApplication::translate("ImageEditingWindow", "The image could not be loaded"))
             d.showNotice(Impl::Notice::LoadError);
         else
             d.message(source.error);
@@ -1144,7 +1181,7 @@ void ImageEditingWindow::present(ImageEditingSource source) {
     d.drawing(ImageEditingCanvas::Mode::Pan);
     emit loaded(true);
 }
-void ImageEditingWindow::presentSource(ScreenshotExportSource source) {
+void ImageEditingWindow::presentSource(ScreenshotExportSource source, QString originalFileName) {
     auto& d = *m_impl;
     if (d.closing)
         return;
@@ -1152,21 +1189,25 @@ void ImageEditingWindow::presentSource(ScreenshotExportSource source) {
     d.cancelLoading();
     d.setLoading(true);
     d.loadArtifact = std::make_shared<ScreenshotExportArtifact>(std::move(source));
-    if (!d.loadArtifact->requestImage(this, [this, generation](ScreenshotExportImageResult result) {
-            if (m_impl->closing || m_impl->loadGeneration != generation)
-                return;
-            // Keep the artifact alive until its delivery callback returns.
-            [[maybe_unused]] const auto artifact = std::move(m_impl->loadArtifact);
-            ImageEditingSource editingSource;
-            editingSource.image = std::move(result.image);
-            editingSource.pixelSize = editingSource.image.size();
-            editingSource.canvasRect = QRectF(QPointF(), QSizeF(editingSource.pixelSize));
-            if (editingSource.image.isNull())
-                editingSource.error = tr("The image could not be loaded.");
-            present(std::move(editingSource));
-        })) {
+    if (!d.loadArtifact->requestImage(
+            this, [this, generation, originalFileName = std::move(originalFileName)](
+                      ScreenshotExportImageResult result) {
+                if (m_impl->closing || m_impl->loadGeneration != generation)
+                    return;
+                // Keep the artifact alive until its delivery callback returns.
+                [[maybe_unused]] const auto artifact = std::move(m_impl->loadArtifact);
+                ImageEditingSource editingSource;
+                editingSource.image = std::move(result.image);
+                editingSource.pixelSize = editingSource.image.size();
+                editingSource.canvasRect = QRectF(QPointF(), QSizeF(editingSource.pixelSize));
+                editingSource.originalFileName = originalFileName;
+                editingSource.flattened = true;
+                if (editingSource.image.isNull())
+                    editingSource.error = tr("The image could not be loaded");
+                present(std::move(editingSource));
+            })) {
         ImageEditingSource failure;
-        failure.error = tr("The image could not be loaded.");
+        failure.error = tr("The image could not be loaded");
         present(std::move(failure));
     }
 }
@@ -1192,7 +1233,7 @@ void ImageEditingWindow::presentHistory(storage::CaptureHistoryRecord record) {
         });
     if (!d.loadJob.isValid()) {
         ImageEditingSource failure;
-        failure.error = tr("The image could not be loaded.");
+        failure.error = tr("The image could not be loaded");
         present(std::move(failure));
     }
 }
@@ -1202,25 +1243,37 @@ void ImageEditingWindow::presentPinnedRecord(QString id) {
         return;
     const auto generation = ++d.loadGeneration;
     d.cancelLoading();
+    d.setLoading(true);
     if (d.services.pins)
         if (auto* pin = d.services.pins->liveWindow(id)) {
-            auto source = pin->imageEditingSnapshot();
-            if (!source.image.isNull() || source.layeredImage.isValid()) {
-                present(std::move(source));
-                return;
-            }
+            const QPointer<ImageEditingWindow> guard(this);
+            pin->requestRenderedImageSnapshot([guard,
+                                               generation](ScreenshotPinnedImageSnapshot snapshot) {
+                if (!guard || guard->m_impl->closing || guard->m_impl->loadGeneration != generation)
+                    return;
+                if (!snapshot.error.isEmpty() || !snapshot.source.isValid()) {
+                    ImageEditingSource failure;
+                    failure.error = snapshot.error.isEmpty()
+                                        ? ImageEditingWindow::tr("The image could not be loaded")
+                                        : std::move(snapshot.error);
+                    guard->present(std::move(failure));
+                    return;
+                }
+                guard->presentSource(std::move(snapshot.source),
+                                     std::move(snapshot.originalFileName));
+            });
+            return;
         }
-    d.setLoading(true);
-    const auto textPreparation = captureScreenshotPinnedTextPreparation();
+    const auto preparation = captureScreenshotPinnedRenderPreparation();
     auto result = std::make_shared<ImageEditingSource>();
     d.loadJob = ScreenshotExportCoordinator::shared().submit(
         this, ScreenshotExportCoordinator::Priority::Foreground,
-        [id = std::move(id), result, textPreparation](const auto& cancel) {
+        [id = std::move(id), result, preparation](const auto& cancel) {
             if (!cancel.isCancellationRequested()) {
                 auto record =
                     storage::ApplicationStorage::instance().pinnedWindows().loadRecord(id);
                 if (record)
-                    *result = readImageEditingPinned(std::move(*record), textPreparation);
+                    *result = readImageEditingPinned(std::move(*record), preparation);
             }
             return ScreenshotExportTaskResult{};
         },
@@ -1230,7 +1283,7 @@ void ImageEditingWindow::presentPinnedRecord(QString id) {
         });
     if (!d.loadJob.isValid()) {
         ImageEditingSource failure;
-        failure.error = tr("The image could not be loaded.");
+        failure.error = tr("The image could not be loaded");
         present(std::move(failure));
     }
 }

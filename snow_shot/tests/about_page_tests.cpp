@@ -302,7 +302,7 @@ void storeUpdatesOpenMicrosoftStore() {
     auto* action = child<adqt::widgets::AdButton>(page, "aboutUpdateAction");
     require(action->isEnabled() && action->text() == QStringLiteral("Open Microsoft Store") &&
                 child<QLabel>(page, "aboutUpdateStatus")->text() ==
-                    QStringLiteral("Updates are managed by Microsoft Store.") &&
+                    QStringLiteral("Updates are managed by Microsoft Store") &&
                 !child<QProgressBar>(page, "aboutUpdateProgress")->isVisible() &&
                 !child<adqt::widgets::AdButton>(page, "aboutUpdateCancel")->isVisible(),
             "Store About exposes only the external update manager");
@@ -382,7 +382,7 @@ void projectLinksAreExplicitAccessibleAndRecoverable() {
         flushEvents();
         require(error->text() ==
                     expectedTranslation(translator, locale, "AboutPageWidget",
-                                        "Could not open the link. Open %1 in your browser.")
+                                        "Could not open the link. Open %1 in your browser")
                         .arg(links.front().second.toDisplayString()),
                 "an existing link error retranslates and preserves its destination");
         QCoreApplication::removeTranslator(&translator);
@@ -498,7 +498,7 @@ void updatePolicyAndUnavailableCopy() {
     require(!child<adqt::widgets::AdButton>(page, "aboutUpdateAction")->isEnabled(),
             "development copies cannot overwrite themselves");
     require(child<QLabel>(page, "aboutUpdateStatus")->text() ==
-                QStringLiteral("Automatic updates are unavailable for this copy."),
+                QStringLiteral("Automatic updates are unavailable for this copy"),
             "unavailable update status explains the disabled action");
 #endif
 }
@@ -763,6 +763,7 @@ void traySettingsAndFunctionNavigation() {
     for (const auto& action :
          {QStringLiteral("none"), QStringLiteral("screenshot"), QStringLiteral("show_main_window"),
           QStringLiteral("screenshot_copy"), QStringLiteral("screenshot_fixed"),
+          QStringLiteral("open_capture_history"), QStringLiteral("open_pin_to_screen_management"),
           QStringLiteral("open_function_settings")}) {
         const auto previousMiddle = backend.selectValue(middle);
         require(backend.applySelectValue(left, action) && backend.selectValue(left) == action &&
@@ -985,16 +986,15 @@ void mainNavigationSearchThemesAndLanguages() {
                     .contains(expectedTranslation(translator, locale, "AboutPageWidget",
                                                   "GNU General Public License v3.0 or later")),
                 "license details retranslate");
-        require(
-            child<QLabel>(*page, "aboutOpenSource")->text() ==
-                    expectedTranslation(translator, locale, "AboutPageWidget",
-                                        "Free · Open source") &&
-                child<QLabel>(*page, "aboutDescription")->text() ==
-                    expectedTranslation(
-                        translator, locale, "AboutPageWidget",
-                        "Capture, annotate, recognize text, and record your screen,\n"
-                        "so every moment on screen can be expressed clearly and shared easily."),
-            "the new hero copy retranslates immediately");
+        require(child<QLabel>(*page, "aboutOpenSource")->text() ==
+                        expectedTranslation(translator, locale, "AboutPageWidget",
+                                            "Free · Open source") &&
+                    child<QLabel>(*page, "aboutDescription")->text() ==
+                        expectedTranslation(
+                            translator, locale, "AboutPageWidget",
+                            "Capture, annotate, recognize text, and record your screen,\n"
+                            "so every moment on screen can be expressed clearly and shared easily"),
+                "the new hero copy retranslates immediately");
         require(child<QLabel>(*page, "aboutTagline")
                     ->text()
                     .contains(expectedTranslation(translator, locale, "AboutPageWidget",
@@ -1099,6 +1099,11 @@ int main(int argc, char** argv) {
     styles::ThemeManager::instance().initialize(application);
     if (application.arguments().contains(QStringLiteral("--tray-icon-color-only"))) {
         traySystemIconColorSettings();
+        storage.shutdown();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--tray-click-settings-only"))) {
+        traySettingsAndFunctionNavigation();
         storage.shutdown();
         return 0;
     }

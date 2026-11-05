@@ -102,8 +102,8 @@ impl Default for AutoBackendPolicy {
 
 #[cfg(not(target_os = "macos"))]
 pub const DEFAULT_AUTO_BACKEND_PRIORITY: [CaptureBackendKind; 3] = [
-    CaptureBackendKind::DxgiDuplication,
     CaptureBackendKind::WindowsGraphicsCapture,
+    CaptureBackendKind::DxgiDuplication,
     CaptureBackendKind::Gdi,
 ];
 
@@ -331,6 +331,12 @@ pub(crate) trait CaptureBackend: Send + Sync {
     }
     fn display_generation(&self) -> Option<u64> {
         None
+    }
+    /// Validate display-cache freshness before reusing geometry or a region plan.
+    /// Backends with optional notification listeners can refresh on demand here;
+    /// an unavailable display must propagate an error instead of validating stale data.
+    fn checked_display_generation(&self) -> CaptureResult<Option<u64>> {
+        Ok(self.display_generation())
     }
     fn refresh_display_configuration(&self) -> CaptureResult<()> {
         Ok(())

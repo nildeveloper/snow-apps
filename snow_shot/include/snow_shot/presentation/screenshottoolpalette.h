@@ -429,6 +429,15 @@ class ScreenshotToolPalette final : public QWidget,
     [[nodiscard]] QColor recordingKeyboardBackgroundColor() const;
     void setRecordingKeyboardForegroundColor(const QColor& value);
     [[nodiscard]] QColor recordingKeyboardForegroundColor() const;
+    void setRecordingRecordNumberKeys(bool value);
+    [[nodiscard]] bool recordingRecordNumberKeys() const;
+    void setRecordingRecordLettersAndSymbols(bool value);
+    [[nodiscard]] bool recordingRecordLettersAndSymbols() const;
+    void setRecordingRecordControlKeys(bool value);
+    [[nodiscard]] bool recordingRecordControlKeys() const;
+    void setRecordingPreserveKeyboardShortcuts(bool value);
+    [[nodiscard]] bool recordingPreserveKeyboardShortcuts() const;
+    adqt::widgets::AdPopover* recordingKeyboardPopover() const;
     void setRecordingMouseTrailColor(const QColor& color);
     [[nodiscard]] QColor recordingMouseTrailColor() const;
     void setRecordingMouseClickColor(const QColor& color);
@@ -470,6 +479,8 @@ class ScreenshotToolPalette final : public QWidget,
     void setJumpToTranslationPageVisible(bool visible);
     void setTextTransformSelections(const QString& formatting, const QString& punctuation);
     void setTextTargetLanguage(const QString& language);
+    void setTextTranslationServices(const QVector<SnowShotChatModel>& models,
+                                    const QString& selection, bool loading);
     [[nodiscard]] bool ensureActionFamily(ActionFamily family);
     [[nodiscard]] bool ensureStyleFamily(Tool tool);
 
@@ -565,6 +576,8 @@ class ScreenshotToolPalette final : public QWidget,
     void textFormattingRequested(const QString& value);
     void textPunctuationRequested(const QString& value);
     void textTargetLanguageRequested(const QString& language);
+    void textTranslationServicesRequested();
+    void textTranslationServiceRequested(const QString& service);
     void scrollingScreenshotRequested();
     void scrollingImageSplittingRequested();
     void scrollingImageEditingRequested();
@@ -641,6 +654,10 @@ class ScreenshotToolPalette final : public QWidget,
     void recordingMouseTrailColorChanged(const QColor& color);
     void recordingMouseClickColorChanged(const QColor& color);
     void recordingKeyboardVisibleChanged(bool visible);
+    void recordingRecordNumberKeysChanged(bool value);
+    void recordingRecordLettersAndSymbolsChanged(bool value);
+    void recordingRecordControlKeysChanged(bool value);
+    void recordingPreserveKeyboardShortcutsChanged(bool value);
     void recordingMouseHighlightEnabledChanged(bool value);
     void recordingRecordMouseClicksChanged(bool value);
     void recordingRecordMouseScrollingChanged(bool value);
@@ -682,6 +699,7 @@ class ScreenshotToolPalette final : public QWidget,
     void createTableRecognitionActionFamily();
 #endif
     void refreshRecognitionModelSelect();
+    void refreshTextTranslationServiceSelect();
 #if SNOW_SHOT_ENABLE_IMAGE_CONVERSION
     void createImageConversionActionFamily();
 #endif
@@ -736,6 +754,7 @@ class ScreenshotToolPalette final : public QWidget,
     void refreshRecordingExportSettingsText();
     void refreshRecordingEffectSettingsModalText();
     void refreshRecordingMouseOptions();
+    void refreshRecordingKeyboardOptions();
     void refreshRecordingPostProcessingOptions();
     void refreshRecordingHighlightSwatch();
     bool activateTableQrTool(Tool tool, bool toggleVisibleButton = true);
@@ -1004,6 +1023,8 @@ class ScreenshotToolPalette final : public QWidget,
     adqt::widgets::AdSelect* m_textPunctuationSelect = nullptr;
     adqt::widgets::AdSelect* m_textTargetLanguageSelect = nullptr;
     QSpacerItem* m_textTargetLanguageSpacer = nullptr;
+    adqt::widgets::AdSelect* m_textTranslationServiceSelect = nullptr;
+    QSpacerItem* m_textTranslationServiceSpacer = nullptr;
     adqt::widgets::AdButton* m_scrollingScreenshotButton = nullptr;
     adqt::widgets::AdButton* m_printButton = nullptr;
     adqt::widgets::AdButton* m_airDropButton = nullptr;
@@ -1045,6 +1066,15 @@ class ScreenshotToolPalette final : public QWidget,
     std::unique_ptr<snow_shot::presentation::ScreenshotToolPaletteColorPresets>
         m_recordMouseClickColorPresets;
     adqt::widgets::AdButton* m_recordKeyboardButton = nullptr;
+    adqt::widgets::AdPopover* m_recordKeyboardPopover = nullptr;
+    QPointer<adqt::widgets::AdCheckbox> m_recordNumberKeysCheckbox;
+    QPointer<adqt::widgets::AdCheckbox> m_recordLettersAndSymbolsCheckbox;
+    QPointer<adqt::widgets::AdCheckbox> m_recordControlKeysCheckbox;
+    QPointer<adqt::widgets::AdCheckbox> m_recordPreserveKeyboardShortcutsCheckbox;
+    bool m_recordingRecordNumberKeys = true;
+    bool m_recordingRecordLettersAndSymbols = true;
+    bool m_recordingRecordControlKeys = true;
+    bool m_recordingPreserveKeyboardShortcuts = true;
     adqt::widgets::AdButton* m_recordWebcamButton = nullptr;
     adqt::widgets::AdInputNumber* m_recordWebcamSizeInput = nullptr;
     adqt::widgets::AdSelect* m_recordWebcamShapeSelect = nullptr;
@@ -1216,6 +1246,9 @@ class ScreenshotToolPalette final : public QWidget,
     QString m_textFormattingSelection;
     QString m_textPunctuationSelection;
     QString m_textTargetLanguageSelection = QStringLiteral("en");
+    QVector<SnowShotChatModel> m_textTranslationServices;
+    QString m_textTranslationServiceSelection;
+    bool m_textTranslationServicesLoading = false;
     qint64 m_recordingDurationMilliseconds = 0;
     bool m_replayingMaterializedState = false;
     bool m_releasingSecondaryResources = false;

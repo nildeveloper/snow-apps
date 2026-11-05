@@ -191,7 +191,13 @@ int main(int argc, char* argv[]) {
     if (argc == 2 && QString::fromLocal8Bit(argv[1]) == u"--controller-lifetime-tests") {
         return runScreenshotControllerLifetimeTests(argc, argv);
     }
+#ifdef Q_OS_MACOS
+    if (argc == 2 && QString::fromLocal8Bit(argv[1]) == u"--session-focus-tests") {
+        return runScreenshotControllerClipboardTests(argc, argv);
+    }
+#endif
     if (argc == 2 && (QString::fromLocal8Bit(argv[1]) == u"--clipboard-pin-tests" ||
+                      QString::fromLocal8Bit(argv[1]) == u"--controller-reselection-tests" ||
                       QString::fromLocal8Bit(argv[1]) == u"--automatic-selection-tests" ||
                       QString::fromLocal8Bit(argv[1]) == u"--shell-file-startup-tests" ||
                       QString::fromLocal8Bit(argv[1]) == u"--image-editor-pin-tests")) {
@@ -316,6 +322,10 @@ int main(int argc, char* argv[]) {
             config.enable_microphone = static_cast<uint8_t>(arguments.contains(u"microphone"));
             config.show_cursor = 1;
             config.keyboard_size = 64;
+            config.record_number_keys = 1;
+            config.record_letters_and_symbols = 1;
+            config.record_control_keys = 1;
+            config.preserve_keyboard_shortcuts = 1;
             config.mouse_trail_duration_ms = 500;
             config.loop_animated_images = 1;
             if (arguments.contains(u"effects")) {
@@ -400,6 +410,10 @@ int main(int argc, char* argv[]) {
         config.show_cursor = 1;
         config.mouse_trail_duration_ms = 500;
         config.keyboard_size = 64;
+        config.record_number_keys = 1;
+        config.record_letters_and_symbols = 1;
+        config.record_control_keys = 1;
+        config.preserve_keyboard_shortcuts = 1;
         const auto result = snow_recording_gpu_probe(&config, recover ? 1 : 0);
         if (result != SNOW_RECORDING_RESULT_OK) {
             qWarning().noquote() << snow_recording_last_error_message();

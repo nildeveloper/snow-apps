@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "../pinned/screenshotpinnedcropgeometry.h"
 #include "snow_shot/presentation/imageeditingdocument.h"
-#include "snow_shot/presentation/screenshotclipboardcontent.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
 #include "snow_shot/presentation/screenshotimagesource.h"
-#include "snow_shot/presentation/screenshotpinnedwindow.h"
-#include "snow_draw_engine_qt/snow_canvas_image.h"
 #include <QColorSpace>
 #include <QCoreApplication>
 #include <algorithm>
@@ -13,7 +9,7 @@
 namespace snow_shot::presentation {
 namespace {
 QString loadError() {
-    return QCoreApplication::translate("ImageEditingWindow", "The image could not be loaded.");
+    return QCoreApplication::translate("ImageEditingWindow", "The image could not be loaded");
 }
 
 bool hasEditableSelection(const storage::PersistedSelection& selection) {
@@ -64,6 +60,17 @@ void restrictImageEditingSource(ImageEditingSource& source, const QRectF& visibl
     source.samplingSources.append({source.image, full});
     QRectF rasterBounds = full;
     if (source.resultStyle) {
+        // Bake text marks before masking the full backdrop. Painting them after the crop
+        // would restore transparent pixels outside the pin's rounded or shaped selection.
+        if (!source.textAnnotations.empty()) {
+            source.image =
+                renderScreenshotTextAnnotations(source.image, full, source.textAnnotations);
+            if (source.image.isNull()) {
+                source.error = loadError();
+                return;
+            }
+            source.textAnnotations = {};
+        }
         const auto style = ScreenshotResultCompositor::scaledStyle(*source.resultStyle, sx);
         const auto layout =
             ScreenshotResultCompositor::layoutForContent(source.image.size(), style);
@@ -155,51 +162,23 @@ ImageEditingSource readImageEditingHistory(storage::CaptureHistoryRepository& re
     return result;
 }
 ImageEditingSource readImageEditingPinned(storage::PinnedWindowRecord record,
-                                          const ScreenshotPinnedTextPreparation& preparation) {
+                                          const ScreenshotPinnedRenderPreparation& preparation) {
+    const auto name = record.originalFileName;
+    auto rendered = renderScreenshotPinnedImageRecord(std::move(record), preparation);
     ImageEditingSource result;
-    const auto style = decodeScreenshotResultStyle(record.resultStyle);
-    if (!style) {
-        result.error = loadError();
-        return result;
-    }
-    if (style->region || style->cornerRadius != 0 || style->effectWidth() != 0)
-        result.resultStyle = *style;
-    if (record.sourceKind == storage::PinnedWindowSourceKind::ClipboardText) {
-        ScreenshotClipboardOriginalContent original;
-        original.html = record.originalHtml;
-        original.text = record.originalText;
-        original.textStyle = record.textStyle;
-        original.textFormat = record.textFormat;
-        const auto rendered =
-            prepareScreenshotPinnedText(original, record.firstCreationTextDpi, preparation);
-        if (!rendered) {
-            result.error = loadError();
-            return result;
-        }
-        record.image = rendered->image;
-    } else if (record.animationSource)
-        record.image = record.animationSource->firstFrame;
-    result.image =
-        snowCanvasTransformImage(record.image, record.imageTransform, Qt::SmoothTransformation);
-    result.canvasRect = record.contentCanvasRect;
-    if (!result.canvasRect.isValid())
-        result.canvasRect = QRectF(QPointF(), QSizeF(result.image.size()));
-    result.canvasSession = record.canvasSession;
-    result.recognition =
-        ScreenshotPinnedWindow::decodeRecognitionSnapshot(record.recognitionResults);
-    result.originalFileName = record.originalFileName;
-    if (record.cropRect && !result.image.isNull() &&
-        screenshot_pinned_crop_geometry::valid(*record.cropRect) &&
-        QRectF(record.image.rect()).contains(*record.cropRect)) {
-        const auto full = result.canvasRect;
-        const auto visible = screenshot_pinned_crop_geometry::sourceToCanvas(
-                                 record.image.size(), record.imageTransform, full)
-                                 .mapRect(*record.cropRect);
-        restrictImageEditingSource(result, visible);
-    }
-    if (result.image.isNull())
-        result.error = loadError();
-    return result;
+    result.originalFileName = name;
+    result.error = std::move(rendered.error);
+    return completeImageEditingComposite(std::move(result), std::move(rendered.image));
+}
+
+ImageEditingSource readImageEditingPinned(storage::PinnedWindowRecord record,
+                                          const ScreenshotPinnedTextPreparation& preparation) {
+    ScreenshotPinnedRenderPreparation rendering;
+    rendering.text = preparation;
+    rendering.font = QFont();
+    rendering.textColor = Qt::black;
+    rendering.backgroundColor = preparation.baseColor;
+    return readImageEditingPinned(std::move(record), rendering);
 }
 
 ScreenshotExportSource imageEditingCompositeSource(const ImageEditingSource& source) {
@@ -217,6 +196,7 @@ ScreenshotExportSource imageEditingExportSource(const ImageEditingSource& source
                                                   source.canvasRect,    source.image.size(),
                                                   outputStyle,          source.smartErase};
     viewport.samplingSources = source.samplingSources;
+    viewport.textAnnotations = source.textAnnotations;
     return ScreenshotExportSource::fromPinnedViewport(std::move(viewport));
 }
 
@@ -231,6 +211,7 @@ ImageEditingSource completeImageEditingComposite(ImageEditingSource source, QIma
     source.samplingSources.clear();
     source.recognition = {};
     source.resultStyle.reset();
+    source.textAnnotations = {};
     source.flattened = true;
     if (source.image.isNull())
         source.error = loadError();

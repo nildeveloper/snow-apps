@@ -1,6 +1,7 @@
 #include "snow_shot/runtime/runtimeactivitytracker.h"
 #include "snow_shot/platform/applicationqos.h"
 #include "snow_shot/storage/applicationstorage.h"
+#include <QThread>
 #include "snow_shot/app/distribution.h"
 #include "snow_shot/app/edition.h"
 #include <QTimer>
@@ -380,7 +381,7 @@ StorageResult ApplicationStorage::initialize(const StorageInitializationOptions&
     connect(m_configuration.get(), &ConfigurationStore::valueChanged, this,
             [this](const QString& key, const QJsonValue& value) {
                 if (key == QStringLiteral("screenshot_selection/smart_selection")) {
-                    emit smartSelectionChanged(value.toBool());
+                    emit smartSelectionModeChanged(smartSelectionModeFromId(value.toString()));
                 }
             });
     if (QCoreApplication::instance() != nullptr) {
@@ -444,6 +445,8 @@ StorageResult ApplicationStorage::flushNow() {
     if (m_status.directoryChanging || !m_initialized || m_configuration == nullptr) {
         return StorageResult::failure(QStringLiteral("Application storage is not initialized"));
     }
+    if (QThread::currentThread() == thread())
+        emit checkpointRequested();
     if (m_captureHistory != nullptr) {
         m_captureHistory->drain();
         updateHistoryError(m_captureHistory->lastError());
@@ -558,13 +561,13 @@ QString ApplicationStorage::configurationDirectory() const {
     return m_status.effectiveDirectory;
 }
 
-bool ApplicationStorage::smartSelectionEnabled() const {
-    return m_configuration != nullptr
-               ? m_configuration->value(QStringLiteral("screenshot_selection/smart_selection"))
-                     .toBool()
-               : ConfigurationSchema::defaultValue(
-                     QStringLiteral("screenshot_selection/smart_selection"))
-                     .toBool();
+SmartSelectionMode ApplicationStorage::smartSelectionMode() const {
+    return smartSelectionModeFromId(
+        (m_configuration != nullptr
+             ? m_configuration->value(QStringLiteral("screenshot_selection/smart_selection"))
+             : ConfigurationSchema::defaultValue(
+                   QStringLiteral("screenshot_selection/smart_selection")))
+            .toString());
 }
 
 bool ApplicationStorage::requestCaptureHistoryPolicy(const CaptureHistoryPolicy& policy) {
@@ -597,19 +600,20 @@ ApplicationStorage::requestCaptureHistoryPolicyAsync(const CaptureHistoryPolicy&
     return result;
 }
 
-bool ApplicationStorage::requestSmartSelection(bool enabled) {
-    const auto result = requestSmartSelectionAsync(enabled);
+bool ApplicationStorage::requestSmartSelectionMode(SmartSelectionMode mode) {
+    const auto result = requestSmartSelectionModeAsync(mode);
     return result.valid() && result.get().success;
 }
 
-std::shared_future<StorageResult> ApplicationStorage::requestSmartSelectionAsync(bool enabled) {
+std::shared_future<StorageResult>
+ApplicationStorage::requestSmartSelectionModeAsync(SmartSelectionMode mode) {
     if (m_status.directoryChanging || !m_initialized || m_configuration == nullptr ||
         !m_status.writeAvailable) {
         return readyFuture(
             StorageResult::failure(QStringLiteral("Configuration storage is not writable")));
     }
     if (!m_configuration->setValue(QStringLiteral("screenshot_selection/smart_selection"),
-                                   enabled)) {
+                                   smartSelectionModeId(mode))) {
         updateConfigurationError(m_configuration->lastError());
         return readyFuture(StorageResult::failure(m_configuration->lastError()));
     }
@@ -855,13 +859,13 @@ StorageResult ApplicationStorage::requestDirectoryChange(const QString& director
 #ifndef Q_OS_WIN
     Q_UNUSED(directory);
     Q_UNUSED(migrate);
-    return StorageResult::failure(tr("Custom storage directories are only supported on Windows."));
+    return StorageResult::failure(tr("Custom storage directories are only supported on Windows"));
 #else
     if (!m_initialized || !m_status.writeAvailable || m_status.directoryChanging ||
         m_status.historyClearing || m_status.cacheClearing || m_status.pinnedClearing ||
         m_status.historyPolicyUpdating || m_status.pinnedPolicyUpdating)
         return StorageResult::failure(
-            tr("Storage is busy or unavailable. Try again when current operations finish."));
+            tr("Storage is busy or unavailable. Try again when current operations finish"));
     const QString destination = QDir::cleanPath(QDir::fromNativeSeparators(directory.trimmed()));
     const auto validation = validateStorageDirectory(m_status.effectiveDirectory, destination);
     if (!validation.success)
@@ -951,7 +955,7 @@ StorageResult ApplicationStorage::requestDirectoryChange(const QString& director
                     actualPins.insert(pin.id);
                 if (actualPins != expectedPins)
                     return StorageResult::failure(
-                        tr("Some pinned windows could not be prepared in the new directory."));
+                        tr("Some pinned windows could not be prepared in the new directory"));
                 return prepared->flush();
             };
             options.activate = [&](const QString& root) {
@@ -986,7 +990,7 @@ StorageResult ApplicationStorage::requestDirectoryChange(const QString& director
                     }
                 }
                 if (!diagnostics.initialize(next))
-                    outcome.warning += tr("File logging could not be restarted.");
+                    outcome.warning += tr("File logging could not be restarted");
             }
             return outcome;
         }));

@@ -591,6 +591,158 @@ void recordingCursorOptionsAreIndependentAndLazy() {
             "busy recording must dismiss and disable cursor options");
 }
 
+void recordingKeyboardOptionsAreIndependentAndLazy() {
+    ScreenshotToolPalette::Options options;
+    options.showShapeTool = true;
+    options.showRecordingControls = true;
+    options.recordingDrawingMode = true;
+    ScreenshotToolPalette palette(options);
+    auto* exportSettings = palette.findChild<adqt::widgets::AdButton*>(
+        QStringLiteral("screenRecordingExportSettings"));
+    require(exportSettings != nullptr, "recording must expose Export Settings");
+    exportSettings->click();
+    require(palette.recordingExportSettingsVisible(),
+            "keyboard options fixture must open the export settings row");
+    palette.show();
+    palette.prepareForDisplay();
+    QCoreApplication::processEvents();
+    auto* keyboard =
+        palette.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenRecordingShowKeyboard"));
+    auto* popover = palette.recordingKeyboardPopover();
+    require(keyboard && popover && !popover->contentWidget(), "keyboard options must be lazy");
+    require(popover->sourceWidget() == keyboard &&
+                popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover &&
+                popover->placement() == adqt::widgets::AdPopover::Placement::Bottom &&
+                popover->popupLayerMode() == adqt::widgets::AdPopover::PopupLayerMode::QtTool &&
+                popover->factoryContentLifetime() ==
+                    adqt::widgets::AdPopover::FactoryContentLifetime::RecreateOnOpen,
+            "keyboard options must match adjacent native hover popovers");
+    require(palette.recordingRecordNumberKeys() && palette.recordingRecordLettersAndSymbols() &&
+                palette.recordingRecordControlKeys() &&
+                palette.recordingPreserveKeyboardShortcuts(),
+            "all keystroke filters must default to enabled");
+    int numbers = 0, letters = 0, controls = 0, shortcuts = 0, visibility = 0;
+    QObject::connect(&palette, &ScreenshotToolPalette::recordingRecordNumberKeysChanged, &palette,
+                     [&](bool) { ++numbers; });
+    QObject::connect(&palette, &ScreenshotToolPalette::recordingRecordLettersAndSymbolsChanged,
+                     &palette, [&](bool) { ++letters; });
+    QObject::connect(&palette, &ScreenshotToolPalette::recordingRecordControlKeysChanged, &palette,
+                     [&](bool) { ++controls; });
+    QObject::connect(&palette, &ScreenshotToolPalette::recordingPreserveKeyboardShortcutsChanged,
+                     &palette, [&](bool) { ++shortcuts; });
+    QObject::connect(&palette, &ScreenshotToolPalette::recordingKeyboardVisibleChanged, &palette,
+                     [&](bool) { ++visibility; });
+    popover->preparePopup();
+    const auto checkbox = [popover](const char* name) {
+        return popover->contentWidget()->findChild<adqt::widgets::AdCheckbox*>(
+            QString::fromLatin1(name));
+    };
+    auto* number = checkbox("screenRecordingRecordNumberKeys");
+    auto* letter = checkbox("screenRecordingRecordLettersAndSymbols");
+    auto* control = checkbox("screenRecordingRecordControlKeys");
+    auto* shortcut = checkbox("screenRecordingPreserveKeyboardShortcuts");
+    auto* layout = qobject_cast<QVBoxLayout*>(popover->contentWidget()->layout());
+    require(number && letter && control && shortcut && layout && layout->count() == 4 &&
+                layout->itemAt(0)->widget() == number && layout->itemAt(1)->widget() == letter &&
+                layout->itemAt(2)->widget() == control && layout->itemAt(3)->widget() == shortcut,
+            "keystroke checkboxes must appear in the requested vertical order");
+    require(number->text() == QStringLiteral("Number keys") &&
+                letter->text() == QStringLiteral("Letters and symbols") &&
+                control->text() == QStringLiteral("Control keys") &&
+                shortcut->text() == QStringLiteral("Preserve keyboard shortcuts"),
+            "keystroke options must expose the requested labels");
+    for (auto* option : {number, letter, control, shortcut}) {
+        require(option->isChecked() && option->isEnabled() &&
+                    option->accessibleName() == option->text(),
+                "keystroke defaults must be checked and accessible");
+    }
+    number->click();
+    letter->click();
+    control->click();
+    shortcut->click();
+    require(numbers == 1 && letters == 1 && controls == 1 && shortcuts == 0 &&
+                !palette.recordingRecordNumberKeys() &&
+                !palette.recordingRecordLettersAndSymbols() &&
+                !palette.recordingRecordControlKeys() &&
+                palette.recordingPreserveKeyboardShortcuts() && !shortcut->isEnabled() &&
+                shortcut->isChecked() && visibility == 0 && !palette.recordingKeyboardVisible(),
+            "disabling controls must retain but disable shortcut preservation without toggling "
+            "recording");
+    control->click();
+    shortcut->click();
+    require(controls == 2 && shortcuts == 1 && shortcut->isEnabled() &&
+                !palette.recordingPreserveKeyboardShortcuts(),
+            "shortcut preservation becomes editable when control keys are enabled");
+    keyboard->click();
+    require(visibility == 1 && palette.recordingKeyboardVisible() &&
+                !palette.recordingRecordNumberKeys() && !palette.recordingRecordLettersAndSymbols(),
+            "the main keyboard button must retain its independent recording toggle");
+    palette.setRecordingRecordNumberKeys(true);
+    palette.setRecordingRecordLettersAndSymbols(true);
+    palette.setRecordingRecordControlKeys(false);
+    palette.setRecordingPreserveKeyboardShortcuts(true);
+    require(numbers == 1 && letters == 1 && controls == 2 && shortcuts == 1 &&
+                number->isChecked() && letter->isChecked() && !control->isChecked() &&
+                shortcut->isChecked() && !shortcut->isEnabled(),
+            "programmatic keystroke synchronization must not emit user changes");
+    require(palette.setPhysicalScale(1.5) && layout->spacing() == 12 &&
+                number->font().pixelSize() == 21,
+            "materialized keyboard options must follow the toolbar scale");
+    class KeyboardOptionsTranslator final : public QTranslator {
+      public:
+        bool isEmpty() const override {
+            return false;
+        }
+        QString translate(const char* context, const char* source, const char*,
+                          int) const override {
+            return qstrcmp(context, "ScreenshotToolPalette") == 0
+                       ? QStringLiteral("Translated ") + QString::fromUtf8(source)
+                       : QString();
+        }
+    } translator;
+    QCoreApplication::installTranslator(&translator);
+    QCoreApplication::processEvents();
+    require(number->text() == QStringLiteral("Translated Number keys") &&
+                letter->text() == QStringLiteral("Translated Letters and symbols") &&
+                control->text() == QStringLiteral("Translated Control keys") &&
+                shortcut->text() == QStringLiteral("Translated Preserve keyboard shortcuts") &&
+                shortcut->accessibleName() == shortcut->text(),
+            "open keyboard options must retranslate labels and accessible names");
+    QCoreApplication::removeTranslator(&translator);
+    QCoreApplication::processEvents();
+    popover->show();
+    QCoreApplication::processEvents();
+    require(popover->isVisible(), "keyboard options can open without enabling another category");
+    QPointer<adqt::widgets::AdCheckbox> previousNumber = number;
+    palette.setActiveTool(ScreenshotToolPalette::Tool::Shape);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    require(!popover->isVisible() && !popover->contentWidget() && !previousNumber,
+            "leaving export settings must dismiss and destroy lazy keyboard options");
+    exportSettings->click();
+    require(palette.recordingExportSettingsVisible(), "export settings can be restored");
+    QKeyEvent down(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+    QCoreApplication::sendEvent(keyboard, &down);
+    QCoreApplication::processEvents();
+    number = checkbox("screenRecordingRecordNumberKeys");
+    control = checkbox("screenRecordingRecordControlKeys");
+    shortcut = checkbox("screenRecordingPreserveKeyboardShortcuts");
+    require(popover->isVisible() && number && number->isChecked() && control &&
+                !control->isChecked() && shortcut && shortcut->isChecked() &&
+                !shortcut->isEnabled(),
+            "keyboard opening must recreate and restore all option preferences");
+    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QCoreApplication::sendEvent(number, &escape);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    require(!popover->isVisible() && !popover->contentWidget(),
+            "Escape must dismiss keyboard options before recording commands");
+    popover->show();
+    palette.setRecordingSession(ScreenshotToolPalette::RecordingSessionStatus::starting());
+    require(!popover->isEnabled() && !popover->isVisible() && !popover->contentWidget(),
+            "busy recording must disable and dismiss keyboard options");
+    palette.setRecordingSession(ScreenshotToolPalette::RecordingSessionStatus::recording());
+    require(!popover->isEnabled(), "active recording must keep keyboard filters disabled");
+}
+
 void recordingPostProcessingOptionsBindState() {
     ScreenshotToolPalette::Options options;
     options.showShapeTool = true;
@@ -1873,7 +2025,7 @@ void dynamicToolbarLabelsUseEveryTranslationCatalog() {
                 "Show Cursor must retranslate with its configurable shortcut");
         cursorPalette.setCursorAvailable(false);
         const QString unavailable = QCoreApplication::translate(
-            "ScreenshotToolPalette", "Cursor data is unavailable for this screenshot.");
+            "ScreenshotToolPalette", "Cursor data is unavailable for this screenshot");
         require(cursorButton->toolTip() == unavailable &&
                     cursorButton->accessibleName() == cursorLabel &&
                     cursorButton->accessibleDescription() == unavailable &&
@@ -7852,10 +8004,13 @@ void ocrToolReplacesSelectionActionToolbarContents() {
         QStringLiteral("screenshotOcrTextPunctuationSelect"));
     auto* targetSelect = palette.findChild<adqt::widgets::AdSelect*>(
         QStringLiteral("screenshotTranslationQuickTargetLanguageSelect"));
+    auto* serviceSelect = palette.findChild<adqt::widgets::AdSelect*>(
+        QStringLiteral("screenshotTranslationQuickServiceSelect"));
     require(sendToBack == nullptr && edit != nullptr && translate != nullptr && reset != nullptr &&
                 settings != nullptr && undo != nullptr && redo != nullptr &&
-                textSelects.size() == 3 && formattingSelect != nullptr &&
-                punctuationSelect != nullptr && targetSelect != nullptr && targetSelect->isHidden(),
+                textSelects.size() == 4 && formattingSelect != nullptr &&
+                punctuationSelect != nullptr && targetSelect != nullptr &&
+                targetSelect->isHidden() && serviceSelect != nullptr && serviceSelect->isHidden(),
             "the shared action panel should contain the OCR editing controls");
     require(
         undo->toolTip() == shortcutTooltip(QStringLiteral("Undo"), {QStringLiteral("Ctrl+Z")}) &&
@@ -7867,8 +8022,37 @@ void ocrToolReplacesSelectionActionToolbarContents() {
             "OCR mode should replace selection actions with text editing controls");
     QLayout* actionLayout = actionPanel->layout();
     require(actionLayout->indexOf(punctuationSelect) < actionLayout->indexOf(targetSelect) &&
-                actionLayout->indexOf(targetSelect) < actionLayout->indexOf(reset),
-            "quick target language follows punctuation and precedes Reset");
+                actionLayout->indexOf(targetSelect) < actionLayout->indexOf(serviceSelect) &&
+                actionLayout->indexOf(serviceSelect) < actionLayout->indexOf(reset),
+            "quick translation service follows target language and precedes Reset");
+    int serviceRequests = 0;
+    int catalogRequests = 0;
+    QString requestedService;
+    QObject::connect(&palette, &ScreenshotToolPalette::textTranslationServicesRequested,
+                     [&] { ++catalogRequests; });
+    QObject::connect(&palette, &ScreenshotToolPalette::textTranslationServiceRequested,
+                     [&](const QString& value) {
+                         ++serviceRequests;
+                         requestedService = value;
+                     });
+    const QVector<SnowShotChatModel> services{
+        {QStringLiteral("model-a"), QStringLiteral("Model A")},
+        {QStringLiteral("custom:test"), QStringLiteral("Custom AI model")},
+        {QStringLiteral("free-translation"), QStringLiteral("Free Translation"), false,
+         QStringLiteral("free-translation")},
+        {QStringLiteral("translation:test"), QStringLiteral("Custom service"), false,
+         QStringLiteral("text")},
+        {QStringLiteral("qwen-mt"), QStringLiteral("Qwen MT"), false, QStringLiteral("qwen-mt")}};
+    palette.setTextTranslationServices({}, {}, true);
+    require(serviceSelect->loading() && !serviceSelect->isEnabled(),
+            "an empty service catalog shows loading and prevents selection");
+    palette.setTextTranslationServices(services, QStringLiteral("translation:test"), false);
+    require(serviceRequests == 0 && catalogRequests == 0 && !serviceSelect->loading() &&
+                serviceSelect->isEnabled() &&
+                serviceSelect->currentValue() == QStringLiteral("translation:test") &&
+                serviceSelect->model()->rowCount() == services.size() &&
+                !serviceSelect->allowClear(),
+            "publishing free, custom and AI services selects the saved identity without saving");
     int targetRequests = 0;
     QString requestedTarget;
     QObject::connect(&palette, &ScreenshotToolPalette::textTargetLanguageRequested,
@@ -7945,6 +8129,26 @@ void ocrToolReplacesSelectionActionToolbarContents() {
                     targetSelect->currentValue().toString() == QStringLiteral("zh-Hant") &&
                     targetRequests == 0,
                 "OCR options retranslate without changing selections or requesting a target save");
+        require(serviceSelect->currentValue() == QStringLiteral("translation:test") &&
+                    serviceRequests == 0 &&
+                    serviceSelect->accessibleName() ==
+                        QCoreApplication::translate("ScreenshotToolPalette", "Translation service"),
+                "service labels retranslate without saving or changing the selected service");
+        const auto serviceOptions = serviceSelect->options();
+        require(serviceOptions.size() == services.size(),
+                "quick service exposes every shared service exactly once");
+        for (qsizetype row = 0; row < serviceOptions.size(); ++row) {
+            const auto& option = serviceOptions.at(row);
+            const auto& model = services.at(row);
+            const QString label =
+                row == 2 ? QCoreApplication::translate("snow_shot::translation::TranslationService",
+                                                       "Free Translation")
+                         : model.name;
+            const QString group = QCoreApplication::translate(
+                "TranslationService", row < 2 ? "General Models" : "Translation Models");
+            require(option.value == model.id && option.label == label && option.group == group,
+                    "quick services preserve the shared catalog order, names and model groups");
+        }
     }
     formattingSelect->setCurrentValue(QStringLiteral("remove"));
     punctuationSelect->setCurrentValue(QStringLiteral("full"));
@@ -7989,6 +8193,21 @@ void ocrToolReplacesSelectionActionToolbarContents() {
     palette.setTextTranslationState(true, true, true, false, false, false);
     require(!targetSelect->isHidden() && targetSelect->isEnabled() && targetSelect->searchEnabled(),
             "quick target is visible and remains searchable during streaming");
+    require(!serviceSelect->isHidden() && serviceSelect->isEnabled() &&
+                serviceSelect->searchEnabled(),
+            "quick service remains visible and searchable during streaming");
+    serviceSelect->setPopupVisible(true);
+    require(catalogRequests == 1 && serviceRequests == 0,
+            "opening the quick picker requests services without selecting one");
+    serviceSelect->setPopupVisible(false);
+    serviceSelect->setPopupVisible(true);
+    require(catalogRequests == 2 && serviceRequests == 0,
+            "reopening the quick picker allows catalog loading to retry");
+    serviceSelect->setPopupVisible(false);
+    serviceSelect->setCurrentValue(QStringLiteral("model-a"));
+    require(serviceRequests == 1 && requestedService == QStringLiteral("model-a"),
+            "quick service publishes the stable service identity");
+    palette.setTextTranslationServices(services, QStringLiteral("model-a"), false);
     targetSelect->setCurrentValue(QStringLiteral("ko"));
     require(targetRequests == 1 && requestedTarget == QStringLiteral("ko"),
             "quick target publishes a primary-language change");
@@ -8013,7 +8232,11 @@ void ocrToolReplacesSelectionActionToolbarContents() {
                 !reset->isEnabled(),
             "Edit should return to its inactive state after text editing exits");
     palette.setActiveTool(ScreenshotToolPalette::Tool::Ocr);
-    require(targetSelect->isHidden(), "quick target is hidden outside Text Translation");
+    require(targetSelect->isHidden() && serviceSelect->isHidden(),
+            "quick target and service are hidden outside Text Translation");
+    palette.setTextTranslationServices({}, {}, false);
+    require(!serviceSelect->isEnabled() && !serviceSelect->loading() && serviceRequests == 1,
+            "clearing the service catalog disables the selector without sending a save");
 }
 
 void recognitionToolsKeepDrawingToolsAvailable() {
@@ -19708,7 +19931,7 @@ void moveToolExposesCaptureCursorAndRecaptureOptions() {
     cursor->click();
     require(!cursor->isEnabled() && cursorChanges == 0 &&
                 cursor->toolTip() ==
-                    QStringLiteral("Cursor data is unavailable for this screenshot."),
+                    QStringLiteral("Cursor data is unavailable for this screenshot"),
             "unavailable cursor data must disable its action with an explanation");
     palette.setCursorAvailable(true);
     cursor->click();
@@ -20312,6 +20535,8 @@ void layoutCompactionToolbar() {
     }
 }
 
+void runScreenshotQuickTextAnnotationToolbarTests();
+
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
     QTemporaryDir storageDirectory;
@@ -20357,6 +20582,10 @@ int main(int argc, char** argv) {
         application.setFont(previewFont);
     }
 #endif
+    if (application.arguments().contains(QStringLiteral("--quick-text-annotation-only"))) {
+        runScreenshotQuickTextAnnotationToolbarTests();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--custom-color-presets-only"))) {
         customColorPresetSettingsPersistAndValidate(
             {executableDirectory, storageDirectory.path(), 60000});
@@ -20535,6 +20764,7 @@ int main(int argc, char** argv) {
     if (application.arguments().contains(QStringLiteral("--recording-controls-only"))) {
         recordingSessionStatusMakesInvalidCombinationsUnrepresentable();
         recordingCursorOptionsAreIndependentAndLazy();
+        recordingKeyboardOptionsAreIndependentAndLazy();
         recordingPostProcessingOptionsBindState();
         recordingEffectSettingsModal();
         recordingControlsRemainLaidOutAcrossStateChanges();

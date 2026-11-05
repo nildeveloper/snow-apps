@@ -279,7 +279,8 @@ void liveSwitch(bool migrate) {
     auto* configuration = &app.configuration();
     auto* history = &app.captureHistory();
     auto* pins = &app.pinnedWindows();
-    require(configuration->setValue(QStringLiteral("screenshot_selection/smart_selection"), false),
+    require(configuration->setValue(QStringLiteral("screenshot_selection/smart_selection"),
+                                    QStringLiteral("disabled")),
             "custom setting");
     const auto open = pin();
     const auto closed = pin();
@@ -292,6 +293,9 @@ void liveSwitch(bool migrate) {
     require(pins->create(open).success && pins->create(closed).success &&
                 pins->markClosed(closed.id).success && pins->create(filePin).success,
             "pin fixtures");
+    QStringList stacking{open.id, closed.id, filePin.id};
+    require(pins->updateStackingOrder(QStringLiteral("default"), stacking).success,
+            "non-timestamp stacking metadata before relocation");
     write(QDir(source).filePath(QStringLiteral("assets/ocr/test")), QByteArrayLiteral("ocr"));
     const auto publication = history->publish(screenshot()).get();
     if (!publication.storage.success)
@@ -332,7 +336,8 @@ void liveSwitch(bool migrate) {
         });
     require(app.requestDirectoryChange(target, migrate).success, "start asynchronous migration");
     require(!app.requestDirectoryChange(target, migrate).success, "duplicate migration rejected");
-    require(!configuration->setValue(QStringLiteral("screenshot_selection/smart_selection"), true),
+    require(!configuration->setValue(QStringLiteral("screenshot_selection/smart_selection"),
+                                     QStringLiteral("window_sub_element")),
             "writes frozen during migration");
     QElapsedTimer timer;
     timer.start();
@@ -352,7 +357,8 @@ void liveSwitch(bool migrate) {
             "consumer references remain valid");
     require(app.configurationDirectory() == target && !app.directoryChanging(),
             "new directory immediately active");
-    require(!app.smartSelectionEnabled(), "settings preserved");
+    require(app.smartSelectionMode() == snow_shot::SmartSelectionMode::Disabled,
+            "settings preserved");
     require(diagnostics.status().directory == QDir(target).filePath(QStringLiteral("logs")) &&
                 diagnostics.flush(),
             "diagnostics follow new root");
@@ -370,9 +376,14 @@ void liveSwitch(bool migrate) {
             "private file-pin payload follows new root and external source stays untouched");
     require(pins->loadRecord(closed.id).has_value() == migrate,
             "closed pin migration follows switch");
+    if (!migrate)
+        stacking.removeAll(closed.id);
+    require(pins->stackingOrder(QStringLiteral("default")) == stacking,
+            "relocation retains relative order and prunes removed members");
     require(QFileInfo::exists(QDir(target).filePath(QStringLiteral("assets/ocr/test"))) == migrate,
             "OCR migration follows switch");
-    require(configuration->setValue(QStringLiteral("screenshot_selection/smart_selection"), true) &&
+    require(configuration->setValue(QStringLiteral("screenshot_selection/smart_selection"),
+                                    QStringLiteral("window_sub_element")) &&
                 app.flushNow().success,
             "new settings remain writable");
     require(pins->create(pin()).success && pins->flush().success, "new pinned records writable");
@@ -381,13 +392,19 @@ void liveSwitch(bool migrate) {
     diagnostics.shutdown();
     app.shutdown();
     require(app.initialize({dir.filePath(QStringLiteral("bin")), source, 60000}).success &&
-                app.configurationDirectory() == target && app.smartSelectionEnabled(),
+                app.configurationDirectory() == target &&
+                app.smartSelectionMode() == snow_shot::SmartSelectionMode::WindowSubElement,
             "restart uses committed data");
     app.shutdown();
 }
 } // namespace
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--stacking-only"))) {
+        liveSwitch(true);
+        liveSwitch(false);
+        return 0;
+    }
     validation();
     junctionsAreNeverTraversed();
     transactions();

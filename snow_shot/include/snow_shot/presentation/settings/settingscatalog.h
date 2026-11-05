@@ -80,6 +80,7 @@ enum class SettingsSelectBinding {
     ScreenshotApiMode,
     ScreenRecordingApiMode,
     WindowElementApi,
+    SmartSelection,
     ScreenshotToolbarSize,
     SelectionTransitionAnimation,
     OcrFillStyle,
@@ -118,6 +119,7 @@ enum class SettingsSelectBinding {
     SkinPosition,
     ToolbarSkinPosition,
     TrayMenuSkinPosition,
+    FullscreenWindowFilter,
 };
 
 struct SettingsSelectDefinition {
@@ -131,7 +133,6 @@ enum class SettingsSwitchBinding {
     PinnedHistoryEnabled,
     HistoryKeepPermanently,
     PinnedHistoryKeepPermanently,
-    SmartSelection,
     OcrResidentProcess,
     OcrModelHotStart,
     OcrHardwareAcceleration,
@@ -156,6 +157,7 @@ enum class SettingsSwitchBinding {
     ShowOriginalImagePreview,
     ShowTextHighlighting,
     PinAutomaticTextRecognition,
+    PinQuickAnnotationForSelectedText,
     PinAutoResizeWindow,
     PinShowWindowButtons,
     PinShakeWindowToHideOthers,

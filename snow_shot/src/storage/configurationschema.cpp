@@ -253,8 +253,8 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
     {QStringLiteral("api_configuration/custom_models"), QJsonArray(),
      ConfigurationValueKind::Structured},
 #endif
-    {QStringLiteral("storage/schema_version"), 4, ConfigurationValueKind::Integer,
-     ConfigurationIntegerRange{4, 4, 1}},
+    {QStringLiteral("storage/schema_version"), 5, ConfigurationValueKind::Integer,
+     ConfigurationIntegerRange{5, 5, 1}},
     {QStringLiteral("interface/theme_mode"),
      QStringLiteral("system"),
      ConfigurationValueKind::String,
@@ -387,7 +387,8 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
       QStringLiteral("zh-Hant")}},
     {QStringLiteral("screenshot_translation/language_detection_confidence_threshold"), 60,
      ConfigurationValueKind::Integer, ConfigurationIntegerRange{30, 100}},
-    {QStringLiteral("screenshot_translation/model"), QString(), ConfigurationValueKind::String},
+    {QStringLiteral("screenshot_translation/model"), QStringLiteral("free-translation"),
+     ConfigurationValueKind::String},
 #endif
 #if SNOW_SHOT_ENABLE_IMAGE_CONVERSION
     {QStringLiteral("screenshot_conversion/vision_model"), QString(),
@@ -635,6 +636,11 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      2},
     {QStringLiteral("global_shortcuts/disable_on_focused_fullscreen_window"), false,
      ConfigurationValueKind::Boolean},
+    {QStringLiteral("global_shortcuts/fullscreen_window_filter"),
+     QStringLiteral("game_windows"),
+     ConfigurationValueKind::String,
+     std::nullopt,
+     {QStringLiteral("all_windows"), QStringLiteral("game_windows")}},
     {QStringLiteral("global_mouse/screenshot_copy"),
 #ifdef Q_OS_MACOS
      QJsonObject(),
@@ -716,6 +722,12 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
     {QStringLiteral("screen_recording/keyboard_foreground_color"), QStringLiteral("#FFFFFFFF"),
      ConfigurationValueKind::String},
     {QStringLiteral("screen_recording/show_keyboard"), false, ConfigurationValueKind::Boolean},
+    {QStringLiteral("screen_recording/record_number_keys"), true, ConfigurationValueKind::Boolean},
+    {QStringLiteral("screen_recording/record_letters_and_symbols"), true,
+     ConfigurationValueKind::Boolean},
+    {QStringLiteral("screen_recording/record_control_keys"), true, ConfigurationValueKind::Boolean},
+    {QStringLiteral("screen_recording/preserve_keyboard_shortcuts"), true,
+     ConfigurationValueKind::Boolean},
     {QStringLiteral("screen_recording/enable_webcam"), false, ConfigurationValueKind::Boolean},
     {QStringLiteral("screen_recording/webcam_orientation"), 0, ConfigurationValueKind::Integer,
      ConfigurationIntegerRange{0, 7, 1}},
@@ -765,7 +777,11 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      {QStringLiteral("ultrafast"), QStringLiteral("veryfast"), QStringLiteral("medium"),
       QStringLiteral("veryslow"), QStringLiteral("placebo")}},
     {QStringLiteral("screen_recording/api_mode"),
+#ifdef Q_OS_WIN
+     QStringLiteral("wgc"),
+#else
      QStringLiteral("dxgi"),
+#endif
      ConfigurationValueKind::String,
      std::nullopt,
      {QStringLiteral("dxgi"), QStringLiteral("wgc"), QStringLiteral("gdi")}},
@@ -1241,6 +1257,18 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      std::nullopt,
      {},
      2},
+    {QStringLiteral("pin_to_screen_shortcuts/batch_image_stitching"),
+     QJsonArray{QStringLiteral("Ctrl+Alt+J")},
+     ConfigurationValueKind::StringList,
+     std::nullopt,
+     {},
+     2},
+    {QStringLiteral("pin_to_screen_shortcuts/batch_copy_files_to_clipboard"),
+     QJsonArray{QStringLiteral("Ctrl+Alt+C")},
+     ConfigurationValueKind::StringList,
+     std::nullopt,
+     {},
+     2},
     {QStringLiteral("pin_to_screen_shortcuts/batch_save_as_file"),
      QJsonArray{QStringLiteral("Ctrl+Alt+S")},
      ConfigurationValueKind::StringList,
@@ -1605,6 +1633,10 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      ConfigurationValueKind::String,
      std::nullopt,
      {QStringLiteral("only_when_displayed"), QStringLiteral("always")}},
+    {QStringLiteral("pin_to_screen/quick_annotation_for_selected_text"), true,
+     ConfigurationValueKind::Boolean},
+    {QStringLiteral("pin_to_screen/quick_text_annotation_styles"), QJsonObject(),
+     ConfigurationValueKind::Structured},
     {QStringLiteral("pin_to_screen/duplicate_content_action"),
      QStringLiteral("shake_window"),
      ConfigurationValueKind::String,
@@ -1635,6 +1667,7 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      std::nullopt,
      {QStringLiteral("none"), QStringLiteral("screenshot"), QStringLiteral("show_main_window"),
       QStringLiteral("screenshot_copy"), QStringLiteral("screenshot_fixed"),
+      QStringLiteral("open_capture_history"), QStringLiteral("open_pin_to_screen_management"),
       QStringLiteral("open_function_settings")}},
     {QStringLiteral("tray/middle_click_action"),
      QStringLiteral("screenshot_fixed"),
@@ -1642,6 +1675,7 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      std::nullopt,
      {QStringLiteral("none"), QStringLiteral("screenshot"), QStringLiteral("show_main_window"),
       QStringLiteral("screenshot_copy"), QStringLiteral("screenshot_fixed"),
+      QStringLiteral("open_capture_history"), QStringLiteral("open_pin_to_screen_management"),
       QStringLiteral("open_function_settings")}},
     {QStringLiteral("tray/menu_options"),
      QJsonArray{
@@ -1692,12 +1726,11 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      std::nullopt,
      {QStringLiteral("rectangle"), QStringLiteral("polyline"), QStringLiteral("curve"),
       QStringLiteral("freehand")}},
-    {QStringLiteral("screenshot_selection/smart_selection"), true, ConfigurationValueKind::Boolean},
-    {QStringLiteral("screenshot_selection/selection_target"),
+    {QStringLiteral("screenshot_selection/smart_selection"),
      QStringLiteral("window_sub_element"),
      ConfigurationValueKind::String,
      std::nullopt,
-     {QStringLiteral("window"), QStringLiteral("window_sub_element")}},
+     {QStringLiteral("window_sub_element"), QStringLiteral("window"), QStringLiteral("disabled")}},
     {QStringLiteral("screenshot_selection/background_opacity_percent"), 0,
      ConfigurationValueKind::Integer, ConfigurationIntegerRange{0, 100, 1}},
     {QStringLiteral("screenshot_selection/layout_compaction_enabled"), false,
@@ -1760,14 +1793,14 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      std::nullopt,
      {QStringLiteral("copy"), QStringLiteral("save"), QStringLiteral("quick_save"),
       QStringLiteral("pin"), QStringLiteral("ocr"), QStringLiteral("ocr_copy"),
-      QStringLiteral("none")}},
+      QStringLiteral("cancel"), QStringLiteral("none")}},
     {QStringLiteral("screenshot/middle_mouse_button_action"),
      QStringLiteral("pin"),
      ConfigurationValueKind::String,
      std::nullopt,
      {QStringLiteral("copy"), QStringLiteral("save"), QStringLiteral("quick_save"),
       QStringLiteral("pin"), QStringLiteral("ocr"), QStringLiteral("ocr_copy"),
-      QStringLiteral("none")}},
+      QStringLiteral("cancel"), QStringLiteral("none")}},
     {QStringLiteral("screenshot/quick_selection_modification"), true,
      ConfigurationValueKind::Boolean},
     {QStringLiteral("screenshot/selection_resize_mode"),
@@ -1825,6 +1858,20 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      ConfigurationIntegerRange{0, std::numeric_limits<int>::max(), 1}},
     {QStringLiteral("collage/background_color"), QStringLiteral("#FFFFFFFF"),
      ConfigurationValueKind::String},
+    {QStringLiteral("collage/pdf_stitching_method"),
+     QStringLiteral("page_based"),
+     ConfigurationValueKind::String,
+     std::nullopt,
+     {QStringLiteral("page_based"), QStringLiteral("template_based")}},
+    {QStringLiteral("collage/pdf_template_type"),
+     QStringLiteral("two_images"),
+     ConfigurationValueKind::String,
+     std::nullopt,
+     {QStringLiteral("two_images"), QStringLiteral("id_card"), QStringLiteral("three_images"),
+      QStringLiteral("four_images"), QStringLiteral("five_images"), QStringLiteral("six_images"),
+      QStringLiteral("seven_images"), QStringLiteral("eight_images"),
+      QStringLiteral("nine_images")}},
+    {QStringLiteral("collage/pdf_image_spacing_mm"), 5.0, ConfigurationValueKind::Structured},
     {QStringLiteral("collage/pdf_paper_size"),
      QStringLiteral("a4"),
      ConfigurationValueKind::String,
@@ -2839,7 +2886,8 @@ ConfigurationNormalization ConfigurationSchema::normalize(const QString& key,
         return {normalized, true, normalized != value};
     }
     if (key.startsWith(QStringLiteral("collage/pdf_custom_")) ||
-        key.startsWith(QStringLiteral("collage/pdf_margin_"))) {
+        key.startsWith(QStringLiteral("collage/pdf_margin_")) ||
+        key == QStringLiteral("collage/pdf_image_spacing_mm")) {
         if (!value.isDouble() || !std::isfinite(value.toDouble()))
             return {};
         const bool customDimension = key.startsWith(QStringLiteral("collage/pdf_custom_"));
@@ -3097,6 +3145,17 @@ bool ConfigurationSchema::parseIntegerVersion(const QJsonValue& value, int* vers
 
 QMap<QString, QJsonValue>
 ConfigurationSchema::migrateLegacyValues(QMap<QString, QJsonValue> values) {
+    const QString smartSelectionKey = QStringLiteral("screenshot_selection/smart_selection");
+    const QJsonValue legacyTarget =
+        values.take(QStringLiteral("screenshot_selection/selection_target"));
+    const QJsonValue legacySmartSelection = values.value(smartSelectionKey);
+    if (legacySmartSelection.isBool() ||
+        (!values.contains(smartSelectionKey) && legacyTarget.isString())) {
+        values.insert(smartSelectionKey,
+                      !legacySmartSelection.toBool(true) || legacyTarget == QStringLiteral("window")
+                          ? QStringLiteral("window")
+                          : QStringLiteral("window_sub_element"));
+    }
     const QJsonValue fontPercentage =
         values.take(QStringLiteral("interface/app_font_size_percentage"));
     const QString fontSizeKey = QStringLiteral("interface/app_font_size");

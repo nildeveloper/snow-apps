@@ -87,7 +87,8 @@ QMap<QString, QJsonValue> overlayFromDocument(const QJsonObject& document) {
         }
     }
     for (const QString& legacyKey : {QStringLiteral("screenshot/auto_save_after_copy"),
-                                     QStringLiteral("interface/app_font_size_percentage")}) {
+                                     QStringLiteral("interface/app_font_size_percentage"),
+                                     QStringLiteral("screenshot_selection/selection_target")}) {
         bool present = false;
         const QJsonValue raw = valueAtPath(document, legacyKey, &present);
         if (present) {
@@ -185,6 +186,11 @@ MaterializedConfiguration materializeConfiguration(const QMap<QString, QJsonValu
         }
         QJsonObject screenshotSelection =
             result.document.value(QStringLiteral("screenshot_selection")).toObject();
+        if (screenshotSelection.contains(QStringLiteral("selection_target"))) {
+            screenshotSelection.remove(QStringLiteral("selection_target"));
+            result.document.insert(QStringLiteral("screenshot_selection"), screenshotSelection);
+            result.dirty = !replaceAll;
+        }
         if (screenshotSelection.contains(QStringLiteral("previous_selection"))) {
             screenshotSelection.remove(QStringLiteral("previous_selection"));
             result.document.insert(QStringLiteral("screenshot_selection"), screenshotSelection);
@@ -214,6 +220,13 @@ MaterializedConfiguration materializeConfiguration(const QMap<QString, QJsonValu
         }
 
         QJsonValue raw = currentOverlay.value(entry.key);
+#if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
+        if (entry.key == QStringLiteral("screenshot_translation/model") && mutateDocument &&
+            schemaVersion < 5 && !raw.toString().startsWith(QStringLiteral("custom:")) &&
+            !raw.toString().startsWith(QStringLiteral("translation:"))) {
+            raw = entry.defaultValue;
+        }
+#endif
         // Upgrade only the untouched previous tray default. A customized list keeps its order.
         if (entry.key == QStringLiteral("tray/menu_options") && mutateDocument &&
             !currentOverlay.contains(
@@ -285,7 +298,8 @@ MaterializedConfiguration materializeConfiguration(const QMap<QString, QJsonValu
         }
 
         result.values.insert(entry.key, normalized.value);
-        const bool migratedLegacyValue = !overlay.contains(entry.key);
+        const bool migratedLegacyValue =
+            !overlay.contains(entry.key) || overlay.value(entry.key) != raw;
         if (mutateDocument &&
             (replaceAll || normalized.changed || migratedDestroyShortcut || migratedLegacyValue)) {
             insertPath(&result.document, entry.key, normalized.value);

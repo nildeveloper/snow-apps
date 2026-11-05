@@ -31,12 +31,14 @@
 #include "snow_shot/presentation/imagesplitwindow.h"
 #include "snow_shot/presentation/imageeditingwindow.h"
 #include "snow_shot/presentation/screenshotexportartifact.h"
+#include "snow_shot/presentation/screenshotexportcache.h"
 
 #include "snow_shot/presentation/globalshortcutmanager.h"
 #include "snow_shot/presentation/globalcanvascontroller.h"
 #include "snow_shot/presentation/globalmousemanager.h"
 #include "snow_shot/presentation/mainwindow.h"
 #include "snow_shot/presentation/pinnedwindowgroupmanager.h"
+#include "snow_shot/presentation/pinnedwindowstackingcoordinator.h"
 #include "snow_shot/presentation/windowgroupswitchercontroller.h"
 #include "snow_shot/presentation/screenshotcontroller.h"
 #include "snow_shot/presentation/screenshotautofiltercontroller.h"
@@ -326,6 +328,11 @@ class ApplicationController::Impl {
                     feature, [this, event]() { dispatchGlobalMouseEvent(event); }, false));
             });
         auto& applicationStorage = storage::ApplicationStorage::instance();
+        auto* stacking = groupManager.stackingCoordinator();
+        QObject::connect(&applicationStorage, &storage::ApplicationStorage::checkpointRequested,
+                         stacking, &presentation::PinnedWindowStackingCoordinator::checkpoint);
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, stacking,
+                         &presentation::PinnedWindowStackingCoordinator::shutdown);
         if (!applicationStorage.isInitialized()) {
             static_cast<void>(applicationStorage.initialize());
         }
@@ -389,10 +396,10 @@ class ApplicationController::Impl {
                 systemTray.showUpdateMessage(
                     (edition::isMini
                          ? ApplicationController::tr(
-                               "%1 %2 is available. Open About for update options.")
+                               "%1 %2 is available. Open About for update options")
                                .arg(edition::productName(), version)
                          : ApplicationController::tr(
-                               "Snow Shot %1 is available. Open About for update options.")
+                               "Snow Shot %1 is available. Open About for update options")
                                .arg(version)));
             });
 #ifndef Q_OS_MACOS
@@ -400,10 +407,10 @@ class ApplicationController::Impl {
             systemTray.showUpdateMessage(
                 (edition::isMini
                      ? ApplicationController::tr(
-                           "An update is ready. Open About to restart and update %1.")
+                           "An update is ready. Open About to restart and update %1")
                            .arg(edition::productName())
                      : ApplicationController::tr(
-                           "An update is ready. Open About to restart and update Snow Shot.")));
+                           "An update is ready. Open About to restart and update Snow Shot")));
         });
 #endif
         platform::windows::setAdministratorRestartGuard([this] { return restartAllowed(); });
@@ -418,7 +425,8 @@ class ApplicationController::Impl {
                     diagnostics::DiagnosticsService::instance().status().exporting)
                     return storage::StorageResult::failure(ApplicationController::tr(
                         "Finish capturing, recording, exporting, recognizing text, or updating "
-                        "before changing storage."));
+                        "before changing storage"));
+                groupManager.stackingCoordinator()->beginMutation();
                 migrationSource = storage::ApplicationStorage::instance().configurationDirectory();
                 migrationInput->active = true;
                 systemTray.setEnabled(false);
@@ -435,6 +443,7 @@ class ApplicationController::Impl {
                 return storage::StorageResult::ok();
             },
             [this](const QString& root) {
+                groupManager.stackingCoordinator()->endMutation();
                 if (ocrRecognition)
                     ocrRecognition->resumeStorage(
                         QDir(root).filePath(QStringLiteral("assets/ocr")));
@@ -477,7 +486,7 @@ class ApplicationController::Impl {
                 (directCaptureController != nullptr &&
                  directCaptureController->blocksApplicationUpdate())) {
                 updates->reportBlocked(ApplicationController::tr(
-                    "Finish capturing, recording, or exporting before updating."));
+                    "Finish capturing, recording, or exporting before updating"));
                 return;
             }
             if (!confirmRestartAndUpdate(mainWindow)) {
@@ -485,7 +494,7 @@ class ApplicationController::Impl {
             }
             if (!storage::ApplicationStorage::instance().flushNow().success) {
                 updates->reportBlocked(ApplicationController::tr(
-                    "Your settings could not be saved. Please retry before updating."));
+                    "Your settings could not be saved. Please retry before updating"));
                 return;
             }
             if (imageEditingWindowCoordinator) {
@@ -510,7 +519,7 @@ class ApplicationController::Impl {
                 mcpSourceWork != 0 || (mcpJobs && mcpJobs->hasRunningJobs()) ||
                 !storage::ApplicationStorage::instance().flushNow().success) {
                 updates->reportBlocked(ApplicationController::tr(
-                    "Finish capturing, recording, or exporting before updating."));
+                    "Finish capturing, recording, or exporting before updating"));
                 return;
             }
         });
@@ -583,6 +592,12 @@ class ApplicationController::Impl {
                        .toString() == QStringLiteral("smart_control");
         };
         memoryOptions.safe = [this] { return memoryTrimmingIsSafe(); };
+        memoryOptions.trim = [nativeTrim = std::move(memoryOptions.trim)] {
+            ScreenshotExportCache::pinnedPixels().clear();
+            ScreenshotExportCache::encodedBytes().clear();
+            ScreenshotExportCache::encodedFiles().clear();
+            return nativeTrim();
+        };
         memoryOptimization = std::make_unique<runtime::MemoryOptimizationController>(
             runtime::RuntimeActivityTracker::shared(), std::move(memoryOptions), &q);
 #endif
@@ -611,6 +626,7 @@ class ApplicationController::Impl {
     }
 
     ~Impl() {
+        groupManager.stackingCoordinator()->shutdown();
         storeLifecycle.reset();
         if (memoryOptimization)
             memoryOptimization->stop();
@@ -651,6 +667,7 @@ class ApplicationController::Impl {
     }
 
     std::shared_future<void> terminalCheckpointForStoreUpdate() {
+        groupManager.stackingCoordinator()->shutdown();
         auto& storage = storage::ApplicationStorage::instance();
         auto* configuration = &storage.configuration();
         auto* pins = &storage.pinnedWindows();
@@ -706,6 +723,12 @@ class ApplicationController::Impl {
     }
 
     void setUpdateHandoffPending(bool pending) {
+        if (handoffInput->active != pending) {
+            if (pending)
+                groupManager.stackingCoordinator()->beginMutation();
+            else
+                groupManager.stackingCoordinator()->endMutation();
+        }
         handoffInput->active = pending;
         featureRouter.setSuspended(pending);
         if (screenshotController)
@@ -2051,6 +2074,19 @@ class ApplicationController::Impl {
         }
     }
 
+    ScreenshotPinnedImageSnapshotRequest pinnedImageSnapshotRequest() {
+        return [this](const QString& id, auto complete) {
+            if (auto* pin = groupManager.liveWindow(id)) {
+                pin->requestRenderedImageSnapshot(
+                    [complete = std::move(complete)](ScreenshotPinnedImageSnapshot snapshot) {
+                        complete(std::move(snapshot));
+                    });
+            } else {
+                complete(std::nullopt);
+            }
+        };
+    }
+
     presentation::ImageEditingWindowCoordinator& ensureImageEditingWindowCoordinator() {
         if (!imageEditingWindowCoordinator) {
             presentation::ImageEditingServices services;
@@ -2079,6 +2115,7 @@ class ApplicationController::Impl {
     presentation::ImageSplitWindowCoordinator& ensureImageSplitWindowCoordinator() {
         if (!imageSplitWindowCoordinator) {
             presentation::ImageSplitWindowServices services;
+            services.requestPinnedSnapshot = pinnedImageSnapshotRequest();
             services.stitchToPdf = [this](presentation::ImageSplitSnapshot snapshot) {
                 return ensureCollageWindowCoordinator().presentSplitImagesAsPdf(
                     std::move(snapshot));
@@ -2095,7 +2132,10 @@ class ApplicationController::Impl {
 
     presentation::CollageWindowCoordinator& ensureCollageWindowCoordinator() {
         if (!collageWindowCoordinator) {
-            collageWindowCoordinator = std::make_unique<presentation::CollageWindowCoordinator>(&q);
+            presentation::CollageWindowServices services;
+            services.requestPinnedSnapshot = pinnedImageSnapshotRequest();
+            collageWindowCoordinator =
+                std::make_unique<presentation::CollageWindowCoordinator>(&q, std::move(services));
             QObject::connect(&app, &QCoreApplication::aboutToQuit, collageWindowCoordinator.get(),
                              &presentation::CollageWindowCoordinator::shutdown);
         }

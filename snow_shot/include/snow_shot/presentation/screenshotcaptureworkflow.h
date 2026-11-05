@@ -18,6 +18,8 @@ class ScreenshotInteractionState;
 class ScreenshotIntelligentSelectionModel;
 class ScreenshotSelectionModel;
 
+enum class ScreenshotCaptureFocusDisposition { RestorePrevious, KeepCurrent };
+
 struct ScreenshotCapturePresentationCallbacks {
     std::function<void()> hideToolbar;
     std::function<void()> updateOverlayState;
@@ -37,20 +39,24 @@ struct ScreenshotCaptureWorkflowContext {
     ScreenshotIntelligentSelectionModel& intelligentSelection;
     ScreenshotCapturePresentationCallbacks presentation;
     std::function<void()> captureTerminated = []() {};
-    std::function<bool()> smartSelectionEnabled = []() { return true; };
+    std::function<snow_shot::SmartSelectionMode()> smartSelectionMode = []() {
+        return snow_shot::SmartSelectionMode::WindowSubElement;
+    };
     std::function<void()> refreshCanvasCreationStyles = []() {};
     std::function<void()> restoreSelectionPreferences = []() {};
     std::function<bool()> restoreOriginalScreenColors = []() { return true; };
     std::function<bool()> showCursor = []() { return false; };
-    std::function<ScreenshotIntelligentSelectionTarget()> preferredSelectionTarget = []() {
-        return ScreenshotIntelligentSelectionTarget::WindowSubElement;
-    };
     std::function<void(bool, const QString&)> recaptureCompleted = [](bool, const QString&) {};
     std::function<QPoint()> cursorPosition = [] { return QCursor::pos(); };
     // Navigation's live desktop backup belongs to the ending capture, not its exports.
     std::function<void()> releaseCaptureHistory = []() {};
     std::function<bool()> screenshotSoundNotification = []() { return false; };
     std::function<void()> playShutterSound = []() {};
+    std::function<void(bool)> captureStarting = [](bool) {};
+    std::function<void(ScreenshotCaptureFocusDisposition)> captureEnding =
+        [](ScreenshotCaptureFocusDisposition) {};
+    // Runs after presentation teardown, unlike captureTerminated's model cleanup hook.
+    std::function<void()> captureEnded = []() {};
 };
 
 class ScreenshotCaptureWorkflow final : private ScreenshotCaptureWorkerEventSink {
@@ -72,7 +78,8 @@ class ScreenshotCaptureWorkflow final : private ScreenshotCaptureWorkerEventSink
     [[nodiscard]] bool startRecapture(const QVector<std::uint32_t>& excludedWindowIds = {});
     [[nodiscard]] bool recaptureInProgress() const;
     [[nodiscard]] bool suppressCaptureToolbar() const;
-    void cancelCapture();
+    void cancelCapture(ScreenshotCaptureFocusDisposition focus =
+                           ScreenshotCaptureFocusDisposition::RestorePrevious);
     void cancelCaptureForExport();
     void completeDeferredExportCleanup();
     void handleInitialSmartSelectionResolved(quint64 sessionId);

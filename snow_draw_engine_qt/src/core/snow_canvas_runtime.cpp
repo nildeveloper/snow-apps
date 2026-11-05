@@ -36,7 +36,8 @@ struct SnowCanvasRuntime::Impl {
     bool setQuickSelectionDisabledTools(const QSet<SnowCanvasTool>& tools);
     void destroyAsync();
     QImage renderToImage(const QRectF& virtualSelectionRect, const QSize& outputSize,
-                         const QList<CanvasExportSource>& sources, const QImage& background);
+                         const QList<CanvasExportSource>& sources, const QImage& background,
+                         const SnowCanvasExportBackgroundOverlay& backgroundOverlay);
     QImage renderTilesToImage(const QRectF& sourceFrame, const QSize& sourcePixelSize,
                               const QSize& outputSize, const QList<CanvasExportTile>& tiles,
                               const QList<CanvasExportSource>& sources, const QImage& background);
@@ -243,15 +244,17 @@ void SnowCanvasRuntime::Impl::syncChangedViewportIds(
     }
 }
 
-QImage SnowCanvasRuntime::Impl::renderToImage(const QRectF& virtualSelectionRect,
-                                              const QSize& outputSize,
-                                              const QList<CanvasExportSource>& sources,
-                                              const QImage& background) {
+QImage
+SnowCanvasRuntime::Impl::renderToImage(const QRectF& virtualSelectionRect, const QSize& outputSize,
+                                       const QList<CanvasExportSource>& sources,
+                                       const QImage& background,
+                                       const SnowCanvasExportBackgroundOverlay& backgroundOverlay) {
     if (!hasThreadAccess("renderToImage")) {
         return {};
     }
     return snow_canvas_export::renderToImage(session.handle(), virtualSelectionRect, outputSize,
-                                             sources, session.smartErase().snapshot(), background);
+                                             sources, session.smartErase().snapshot(), background,
+                                             backgroundOverlay);
 }
 
 QImage SnowCanvasRuntime::Impl::renderTilesToImage(const QRectF& sourceFrame,
@@ -460,10 +463,26 @@ QImage SnowCanvasRuntime::renderImageSourcesToImage(const QRectF& canvasRect,
     return snow_canvas_export::renderImageSourcesToImage(canvasRect, outputSize, sources);
 }
 
+QImage SnowCanvasRuntime::renderImageSourcesToImage(const QRectF& canvasRect,
+                                                    const QSize& outputSize,
+                                                    const QList<CanvasExportSource>& sources,
+                                                    const QRect& outputPixelRect) {
+    return snow_canvas_export::renderImageSourcesToImage(canvasRect, outputSize, sources,
+                                                         outputPixelRect);
+}
+
 QImage SnowCanvasRuntime::renderToImage(const QRectF& virtualSelectionRect, const QSize& outputSize,
                                         const QList<CanvasExportSource>& sources,
                                         const QImage& background) {
-    return m_impl->renderToImage(virtualSelectionRect, outputSize, sources, background);
+    return renderToImage(virtualSelectionRect, outputSize, sources, background, {});
+}
+
+QImage
+SnowCanvasRuntime::renderToImage(const QRectF& virtualSelectionRect, const QSize& outputSize,
+                                 const QList<CanvasExportSource>& sources, const QImage& background,
+                                 const SnowCanvasExportBackgroundOverlay& backgroundOverlay) {
+    return m_impl->renderToImage(virtualSelectionRect, outputSize, sources, background,
+                                 backgroundOverlay);
 }
 
 QImage SnowCanvasRuntime::renderTilesToImage(const QRectF& sourceFrame,
