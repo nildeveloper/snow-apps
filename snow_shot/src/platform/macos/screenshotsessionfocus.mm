@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "snow_shot/platform/macos/screenshotsessionfocus.h"
+#include "appkitcompat_p.h"
 
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
@@ -90,7 +91,7 @@ class NativeFocusTarget final : public ScreenshotFocusTarget {
             // Retaining an NSWindow does not mean its Qt owner is still alive or visible.
             if (!m_localWindow.visible || ![NSApp.windows containsObject:m_localWindow])
                 return;
-            [NSApp activate];
+            snow_shot::platform::appkit_compat::activateApplication();
             [m_localWindow makeKeyAndOrderFront:nil];
             if (m_localFocus && m_localFocus->isVisible() &&
                 reinterpret_cast<NSView*>(m_localFocus->window()->internalWinId()).window ==
@@ -107,7 +108,7 @@ class NativeFocusTarget final : public ScreenshotFocusTarget {
             setIfSupported(m_window.get(), kAXMainAttribute, kCFBooleanTrue);
             setIfSupported(m_axApplication.get(), kAXFocusedWindowAttribute, m_window.get());
         }
-        [NSApp yieldActivationToApplication:m_application];
+        snow_shot::platform::appkit_compat::yieldActivationToApplication(m_application);
         if (![m_application activateWithOptions:0])
             return;
         if (raised && m_input) {

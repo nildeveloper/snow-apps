@@ -1,8 +1,9 @@
 """Focused source-boundary probes, not a replacement for the full native build.
 
 The export probe compiles the actual fields, constructor and forwarding expression
-with minimal Qt stand-ins. On macOS the screen adapter is also syntax-checked
-against the real SDK, with Qt stand-ins and a macOS 13 deployment target.
+with minimal Qt stand-ins. On macOS the screen adapter and screenshot focus
+implementation are also syntax-checked against the real SDK, with Qt stand-ins
+and a macOS 13 deployment target.
 """
 
 import os
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EDITOR = ROOT / 'snow_shot/src/presentation/imageediting/imageeditingexportcontroller'
 SCREEN = ROOT / 'snow_shot/src/platform/macos/qtscreencompat_p.h'
 GEOMETRY = ROOT / 'snow_shot/src/presentation/core/screenshotgeometry.cpp'
+FOCUS = ROOT / 'snow_shot/src/platform/macos/screenshotsessionfocus.mm'
 
 
 def compiler_command():
@@ -179,6 +181,80 @@ struct QGuiApplication { static std::vector<QScreen*> screens() { return {}; } }
                                      '-I', str(directory), str(probe)],
                                     text=True, capture_output=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+@unittest.skipUnless(sys.platform == 'darwin', 'requires the real macOS SDK')
+class ScreenshotFocusCompatibility(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.compiler = subprocess.check_output(['xcrun', '--find', 'clang++'], text=True).strip()
+        cls.sdk = subprocess.check_output(
+            ['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+
+    def compile_probe(self, source, directory):
+        # Compile the complete production implementation and its public header.
+        # Only Qt is replaced; AppKit and Accessibility use the actual SDK.
+        (directory / 'qt-standins.h').write_text('''#pragma once
+#include <cstdint>
+#include <string>
+using quint64 = std::uint64_t;
+struct QObject {};
+struct QTimer {
+    template <typename Callback> static void singleShot(int, QObject*, Callback) {}
+};
+struct QThread { static QThread* currentThread(); };
+namespace Qt { enum FocusReason { OtherFocusReason }; }
+struct QWidget {
+    bool isVisible() const;
+    QWidget* window();
+    std::uintptr_t internalWinId() const;
+    void setFocus(Qt::FocusReason);
+};
+struct QGuiApplication { static std::string platformName(); };
+struct QApplication : QGuiApplication {
+    static QWidget* focusWidget();
+    QThread* thread() const;
+};
+extern QApplication* qApp;
+#define QStringLiteral(value) std::string(value)
+template <typename T> struct QPointer {
+    QPointer& operator=(T*);
+    explicit operator bool() const;
+    T* operator->() const;
+};
+''')
+        for name in ('QObject', 'QTimer', 'QApplication', 'QPointer', 'QThread', 'QWidget'):
+            (directory / name).write_text('#include "qt-standins.h"\n')
+        probe = directory / 'focus-probe.mm'
+        probe.write_text(source)
+        return subprocess.run([self.compiler, '-std=c++20', '-fsyntax-only', '-fblocks',
+                               '-Wall', '-Wextra', '-Werror',
+                               '-Werror=unguarded-availability-new',
+                               '-mmacosx-version-min=13.0', '-isysroot', self.sdk,
+                               '-I', str(directory), '-I', str(ROOT / 'snow_shot/include'),
+                               '-I', str(FOCUS.parent), str(probe)],
+                              text=True, capture_output=True, timeout=60)
+
+    def test_production_focus_compiles_against_macos13_sdk_apis(self):
+        with tempfile.TemporaryDirectory(prefix='snow focus probe ') as temporary:
+            result = self.compile_probe(FOCUS.read_text(), Path(temporary))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_probe_rejects_the_previous_unguarded_focus_implementation(self):
+        # Rebuild the failing translation unit, including its original imports.
+        # SDKs differ in how they diagnose the individual activation selectors.
+        broken = FOCUS.read_text().replace('#include "appkitcompat_p.h"\n', '', 1)
+        for guarded, unguarded in (
+            ('snow_shot::platform::appkit_compat::activateApplication()', '[NSApp activate]'),
+            ('snow_shot::platform::appkit_compat::yieldActivationToApplication(m_application)',
+             '[NSApp yieldActivationToApplication:m_application]'),
+        ):
+            self.assertIn(guarded, broken, 'review this fixture after focus changes')
+            broken = broken.replace(guarded, unguarded, 1)
+        with tempfile.TemporaryDirectory(prefix='snow focus mutation ') as temporary:
+            result = self.compile_probe(broken, Path(temporary))
+            self.assertNotEqual(result.returncode, 0, 'the release regression must fail')
+            self.assertIn('only available on macOS 14.0 or newer', result.stderr)
 
 
 @unittest.skipIf(sys.platform == 'darwin', 'native preflight tests the real macOS backport')

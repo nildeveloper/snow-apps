@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "snow_shot/platform/macos/screenshotsessionfocus.h"
+#include "../src/platform/macos/appkitcompat_p.h"
 
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
@@ -31,7 +32,7 @@ bool waitFor(const std::function<bool()>& predicate) {
     return predicate();
 }
 void activate(QWidget& widget) {
-    [NSApp activate];
+    snow_shot::platform::appkit_compat::activateApplication();
     [reinterpret_cast<NSView*>(widget.winId()).window makeKeyAndOrderFront:nil];
     widget.activateWindow();
     widget.setFocus();
@@ -43,7 +44,7 @@ struct RestoreApplication {
     NSRunningApplication* application = [NSWorkspace.sharedWorkspace.frontmostApplication retain];
     ~RestoreApplication() {
         if (application && !application.terminated) {
-            [NSApp yieldActivationToApplication:application];
+            snow_shot::platform::appkit_compat::yieldActivationToApplication(application);
             [application activateWithOptions:0];
         }
         [application release];

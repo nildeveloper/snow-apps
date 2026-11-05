@@ -121,6 +121,9 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
+      - name: Check screenshot focus APIs against the macOS 13 deployment target
+        run: python3 scripts/test-macos13-source-compat.py ScreenshotFocusCompatibility -v
+
       - name: Prepare fixed release signing identity
         env:
           MACOS_SIGNING_P12_BASE64: ${{ secrets.MACOS_SIGNING_P12_BASE64 }}
