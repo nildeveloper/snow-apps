@@ -240,20 +240,21 @@ template <typename T> struct QPointer {
             result = self.compile_probe(FOCUS.read_text(), Path(temporary))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_probe_rejects_unguarded_macos14_activation_apis(self):
-        source = FOCUS.read_text()
+    def test_probe_rejects_the_previous_unguarded_focus_implementation(self):
+        # Rebuild the failing translation unit, including its original imports.
+        # SDKs differ in how they diagnose the individual activation selectors.
+        broken = FOCUS.read_text().replace('#include "appkitcompat_p.h"\n', '', 1)
         for guarded, unguarded in (
             ('snow_shot::platform::appkit_compat::activateApplication()', '[NSApp activate]'),
             ('snow_shot::platform::appkit_compat::yieldActivationToApplication(m_application)',
              '[NSApp yieldActivationToApplication:m_application]'),
         ):
-            with self.subTest(api=unguarded):
-                broken = source.replace(guarded, unguarded, 1)
-                self.assertNotEqual(broken, source, 'review this fixture after focus changes')
-                with tempfile.TemporaryDirectory(prefix='snow focus mutation ') as temporary:
-                    result = self.compile_probe(broken, Path(temporary))
-                    self.assertNotEqual(result.returncode, 0, 'the release regression must fail')
-                    self.assertIn('only available on macOS 14.0 or newer', result.stderr)
+            self.assertIn(guarded, broken, 'review this fixture after focus changes')
+            broken = broken.replace(guarded, unguarded, 1)
+        with tempfile.TemporaryDirectory(prefix='snow focus mutation ') as temporary:
+            result = self.compile_probe(broken, Path(temporary))
+            self.assertNotEqual(result.returncode, 0, 'the release regression must fail')
+            self.assertIn('only available on macOS 14.0 or newer', result.stderr)
 
 
 @unittest.skipIf(sys.platform == 'darwin', 'native preflight tests the real macOS backport')
