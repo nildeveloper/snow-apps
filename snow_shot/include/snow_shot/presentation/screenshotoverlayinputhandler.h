@@ -53,7 +53,7 @@ struct ScreenshotOverlayInputActions {
     std::function<bool(int delta)> stepSelectionOpacity = [](int) { return false; };
     std::function<bool(int delta)> stepSpotlightOpacity = [](int) { return false; };
     std::function<bool(int delta)> stepFilterIntensity = [](int) { return false; };
-    std::function<bool(int delta)> stepPenFilterStrokeWidth = [](int) { return false; };
+    std::function<bool(int delta)> stepBrushFilterStrokeWidth = [](int) { return false; };
     std::function<bool(int delta)> stepWatermarkFontSize = [](int) { return false; };
     std::function<void()> copySelectionToClipboard = []() {};
     std::function<bool()> localShortcutInputAllowed = []() { return true; };
@@ -81,10 +81,9 @@ struct ScreenshotOverlayInputActions {
         return false;
     };
 
-    // Called after a valid selection transitions the interaction into editing.
-    // This is intentionally separate from showToolbar so callers can schedule
-    // a post-selection command (for example, OCR or pinning) without coupling
-    // the input handler to a concrete controller.
+    // Called after committing a selection and applying any explicit or restored tool,
+    // before the handler presents editing UI. Activate pending capture actions or
+    // the remembered tool here; commands may retire the session.
     std::function<void()> selectionConfirmed = []() {};
 
     // Applies the next older screenshot history selection to the current image.
@@ -280,7 +279,8 @@ class ScreenshotOverlayInputHandler final {
   private:
     enum class AspectRatioSnapShortcutState { Released, Snapping, Unlocking };
 
-    void confirmSelection(const std::function<void()>& beforePresentation);
+    bool confirmSelection(const std::function<void()>& beforePresentation);
+    [[nodiscard]] bool canPresentSelection(quint64 sessionId) const;
     [[nodiscard]] QPointF virtualPositionForOverlay(const ScreenshotOverlayWindow* overlay,
                                                     const QPointF& localPosition) const;
     [[nodiscard]] QPoint physicalPositionForCanvasPoint(const QPointF& point) const;

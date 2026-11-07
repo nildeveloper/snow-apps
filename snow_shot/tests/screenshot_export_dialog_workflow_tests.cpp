@@ -246,7 +246,7 @@ void centersOnDisplayOverlay() {
     }
 }
 
-void collageWindowModalityAndRetry(QWidget& owner) {
+void imageStitchingWindowModalityAndRetry(QWidget& owner) {
     QWidget neighbor;
     neighbor.show();
     for (int attempt = 0; attempt < 2; ++attempt) {
@@ -822,7 +822,7 @@ void encodingAndFullResolutionDisplay() {
             require(source.preview == original,
                     "original comparison pixels changed during source preparation");
             for (auto format : {Format::Png, Format::Jpeg, Format::Bmp, Format::Webp, Format::Jxl,
-                                Format::Avif}) {
+                                Format::Avif, Format::Tiff}) {
                 for (int quality : {100, 72}) {
                     const ScreenshotSaveExportOptions options{
                         .size = quality == 100 ? QSize(80, 50) : QSize(96, 32),
@@ -875,7 +875,7 @@ void encodingAndFullResolutionDisplay() {
             require(large.rows.size == QSize(128, 6000) && large.preview.height() == 2048,
                     "large source must retain full dimensions and a bounded preview");
             for (auto format : {Format::Png, Format::Jpeg, Format::Bmp, Format::Webp, Format::Jxl,
-                                Format::Avif}) {
+                                Format::Avif, Format::Tiff}) {
                 const auto output = pipeline::render(
                     large, {.size = QSize(48, 2304), .format = format, .quality = 72}, cancellation,
                     &error);
@@ -1914,7 +1914,7 @@ void previewAndSave(QWidget& owner, const QTemporaryDir& temp) {
     auto* unit = child<AdSegmented>(dimensions, "saveSizeUnitSegmented");
     require(sizeLabel->text() == QStringLiteral("Size") && unit->count() == 2 &&
                 unit->currentValue() == QStringLiteral("pixels") &&
-                unit->optionLabel(0) == QStringLiteral("pixel") &&
+                unit->optionLabel(0) == QStringLiteral("Pixels") &&
                 unit->optionLabel(1) == QStringLiteral("Percentage") &&
                 sizeLabel->geometry().right() < unit->geometry().left() &&
                 unit->geometry().right() == dimensions->rect().right(),
@@ -1961,6 +1961,17 @@ void previewAndSave(QWidget& owner, const QTemporaryDir& temp) {
     require(qualityRow->isHidden() && !compressionRow->isHidden() &&
                 compression->currentValue() == QStringLiteral("medium"),
             "PNG must hide Quality and show Compression level at Medium");
+    format->setCurrentValue(QStringLiteral("tiff"));
+    require(format->currentValue() == QStringLiteral("tiff") && qualityRow->isHidden() &&
+                !compressionRow->isHidden(),
+            "TIFF must offer compression and hide quality");
+    compression->setCurrentValue(QStringLiteral("high"));
+    format->setCurrentValue(QStringLiteral("png"));
+    require(compression->currentValue() == QStringLiteral("medium"),
+            "TIFF compression must remain independent from PNG");
+    format->setCurrentValue(QStringLiteral("tiff"));
+    require(compression->currentValue() == QStringLiteral("high"),
+            "TIFF must restore its own compression setting");
     format->setCurrentValue(QStringLiteral("bmp"));
     require(format->currentValue() == QStringLiteral("bmp") && qualityRow->isHidden() &&
                 compressionRow->isHidden(),
@@ -2039,6 +2050,13 @@ void previewAndSave(QWidget& owner, const QTemporaryDir& temp) {
         "saved output must use normalized extension and requested dimensions");
     flush();
     const QJsonObject rememberedOptions = storage::ScreenshotSettings().manualSaveFormatOptions();
+    require(rememberedOptions.value(QStringLiteral("tiff"))
+                        .toObject()
+                        .value(QStringLiteral("compression_level")) == QStringLiteral("high") &&
+                !rememberedOptions.value(QStringLiteral("tiff"))
+                     .toObject()
+                     .contains(QStringLiteral("quality")),
+            "confirmed saves must persist TIFF compression without a quality option");
     require(rememberedOptions.value(QStringLiteral("png"))
                         .toObject()
                         .value(QStringLiteral("compression_level")) == QStringLiteral("medium") &&
@@ -2260,7 +2278,7 @@ void sizeUnits(QWidget& owner, const QTemporaryDir& temp) {
     require(QApplication::installTranslator(&translator), "size translator unavailable");
     flush();
     require(child<QLabel>(content, "saveSizeLabel")->text() == QStringLiteral("Translated Size") &&
-                unit->optionLabel(0) == QStringLiteral("Translated pixel") &&
+                unit->optionLabel(0) == QStringLiteral("Translated Pixels") &&
                 unit->optionLabel(1) == QStringLiteral("Translated Percentage") &&
                 unit->accessibleName() == QStringLiteral("Translated Size unit") &&
                 width->toolTip() == QStringLiteral("Translated Width") &&
@@ -3620,7 +3638,7 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         if (QApplication::arguments().contains(QStringLiteral("--collage-modality"))) {
-            collageWindowModalityAndRetry(owner);
+            imageStitchingWindowModalityAndRetry(owner);
             ScreenshotExportCoordinator::shared().shutdown();
             storage::ApplicationStorage::instance().shutdown();
             std::cout << "Collage export dialog modality tests passed\n";

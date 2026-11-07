@@ -50,6 +50,7 @@
 #include "snow_shot/presentation/selectedtexttranslationcontroller.h"
 #endif
 #include "snow_shot/presentation/screenshotocrrecognitionservice.h"
+#include "snow_shot/presentation/screenshotocrproxyconfiguration.h"
 #include "snow_shot/presentation/screenshotpinnedwindow.h"
 #include "snow_shot/presentation/screenrecordingfolder.h"
 #include "snow_shot/presentation/systemtraycontroller.h"
@@ -148,7 +149,7 @@ storage::PinnedWindowRepository* initializedPinnedWindowRepository() {
 
 class ApplicationController::Impl {
   public:
-    enum class QuickActionOrigin { Other, GlobalHotkey };
+    enum class QuickActionOrigin { Other, GlobalShortcut };
 
     Impl(ApplicationController& owner, QApplication& application)
         : q(owner), app(application), restartCoordinator(application),
@@ -268,7 +269,7 @@ class ApplicationController::Impl {
         QObject::connect(&globalShortcutManager, &presentation::GlobalShortcutManager::activated,
                          &q, [this](presentation::GlobalShortcutAction action) {
                              if (action != presentation::GlobalShortcutAction::SwitchWindowGroup)
-                                 dispatchQuickAction(action, QuickActionOrigin::GlobalHotkey);
+                                 dispatchQuickAction(action, QuickActionOrigin::GlobalShortcut);
                          });
         QObject::connect(&globalShortcutManager,
                          &presentation::GlobalShortcutManager::bindingActivated, &q,
@@ -283,10 +284,11 @@ class ApplicationController::Impl {
                              systemTray.setGlobalShortcuts(action, state.shortcuts);
                          });
         QObject::connect(&globalShortcutManager,
-                         &presentation::GlobalShortcutManager::globalHotkeysEnabledChanged, &q,
+                         &presentation::GlobalShortcutManager::globalShortcutsEnabledChanged, &q,
                          [this](bool enabled) {
                              systemTray.setQuickActionChecked(
-                                 presentation::GlobalShortcutAction::ToggleGlobalHotkeys, !enabled);
+                                 presentation::GlobalShortcutAction::ToggleGlobalShortcuts,
+                                 !enabled);
                          });
         QObject::connect(
             &globalShortcutManager,
@@ -372,6 +374,7 @@ class ApplicationController::Impl {
             applicationStorage.configuration().value(kOcrTextDetectionProcessingKey).toString());
         ocrRecognition = std::make_unique<ScreenshotOcrRecognitionService>(ocrOptions, &q);
         auto& configuration = applicationStorage.configuration();
+        presentation::bindOcrProxyConfiguration(*ocrRecognition, configuration);
         updates = new update::UpdateService(update::defaultUpdateServiceOptions(), &app);
         updates->setProgressAppearance(
             presentation::styles::ThemeManager::instance().updateProgressAppearance());
@@ -382,8 +385,9 @@ class ApplicationController::Impl {
                     presentation::styles::ThemeManager::instance().updateProgressAppearance());
             });
         updates->setMode(configuration.value(QStringLiteral("updates/mode")).toString());
-        updates->setSystemProxy(configuration.value(QStringLiteral("network/proxy")).toString() ==
-                                u"system");
+        updates->setProxyConfiguration(
+            configuration.value(QStringLiteral("network/proxy")).toString(),
+            configuration.value(QStringLiteral("network/http_proxy")).toString());
         QObject::connect(&presentation::LanguageManager::instance(),
                          &presentation::LanguageManager::languageChanged, updates,
                          [updateService = updates] {
@@ -525,7 +529,7 @@ class ApplicationController::Impl {
         });
         QObject::connect(updates, &update::UpdateService::handoffCommitted, &q, [this] {
             handoffInput->active = false;
-            globalShortcutManager.setGlobalHotkeysEnabled(false);
+            globalShortcutManager.setGlobalShortcutsEnabled(false);
             globalMouseManager.shutdown();
             QApplication::quit();
         });
@@ -769,8 +773,8 @@ class ApplicationController::Impl {
 
     void reportSelectedFilePinFailure(const QString& message) {
         if (!mainWindow || !mainWindow->isVisible() || mainWindow->isMinimized()) {
-            systemTray.showWarningMessage(ApplicationController::tr("Could not pin selected files"),
-                                          message);
+            systemTray.showWarningMessage(
+                ApplicationController::tr("Could not pin selected files to screen"), message);
             return;
         }
         MainWindow& window = ensureMainWindow();
@@ -1620,11 +1624,11 @@ class ApplicationController::Impl {
             QObject::connect(screenshotController.get(),
                              &ScreenshotController::showMainWindowRequested, &q,
                              [this]() { showMainWindow(); });
-            QObject::connect(screenshotController.get(),
-                             &ScreenshotController::imageStitchingRequested, &q,
-                             [this](const QVector<ScreenshotPinnedImageSnapshot>& snapshots) {
-                                 ensureCollageWindowCoordinator().presentPinnedWindows(snapshots);
-                             });
+            QObject::connect(
+                screenshotController.get(), &ScreenshotController::imageStitchingRequested, &q,
+                [this](const QVector<ScreenshotPinnedImageSnapshot>& snapshots) {
+                    ensureImageStitchingWindowCoordinator().presentPinnedWindows(snapshots);
+                });
             QObject::connect(screenshotController.get(),
                              &ScreenshotController::imageSplittingRequested, &q,
                              [this](const presentation::ImageSplitSource& source) {
@@ -1675,8 +1679,12 @@ class ApplicationController::Impl {
 #endif
         if (key == u"updates/mode" && updates != nullptr) {
             updates->setMode(value.toString());
-        } else if (key == u"network/proxy" && updates != nullptr) {
-            updates->setSystemProxy(value.toString() == u"system");
+        } else if ((key == u"network/proxy" || key == u"network/http_proxy") &&
+                   updates != nullptr) {
+            const auto& configuration = storage::ApplicationStorage::instance().configuration();
+            updates->setProxyConfiguration(
+                configuration.value(QStringLiteral("network/proxy")).toString(),
+                configuration.value(QStringLiteral("network/http_proxy")).toString());
         } else if (key == kPinBorderColorKey) {
             QColor color = storage::colorFromRgbaString(value.toString());
             if (!color.isValid()) {
@@ -1787,9 +1795,9 @@ class ApplicationController::Impl {
                             }
                         }));
                 });
-            QObject::connect(mainWindow, &MainWindow::screenshotHistoryCollageRequested, &q,
+            QObject::connect(mainWindow, &MainWindow::screenshotHistoryStitchImagesRequested, &q,
                              [this](const QVector<storage::CaptureHistoryRecord>& records) {
-                                 ensureCollageWindowCoordinator().present(records);
+                                 ensureImageStitchingWindowCoordinator().present(records);
                              });
             QObject::connect(mainWindow, &MainWindow::screenshotHistorySplitRequested, &q,
                              [this](const storage::CaptureHistoryRecord& record) {
@@ -1799,9 +1807,10 @@ class ApplicationController::Impl {
                              [this](const storage::CaptureHistoryRecord& record) {
                                  ensureImageEditingWindowCoordinator().presentHistory(record);
                              });
-            QObject::connect(mainWindow, &MainWindow::pinnedWindowCollageRequested, &q,
+            QObject::connect(mainWindow, &MainWindow::pinnedWindowStitchImagesRequested, &q,
                              [this](const QStringList& recordIds) {
-                                 ensureCollageWindowCoordinator().presentPinnedRecords(recordIds);
+                                 ensureImageStitchingWindowCoordinator().presentPinnedRecords(
+                                     recordIds);
                              });
             QObject::connect(mainWindow, &MainWindow::pinnedWindowSplitRequested, &q,
                              [this](const QString& recordId) {
@@ -1863,7 +1872,7 @@ class ApplicationController::Impl {
         static const QHash<QString, Quick> quickActions{
             {QStringLiteral("screenshot"), Quick::Screenshot},
             {QStringLiteral("screenshot-delay"), Quick::ScreenshotDelay},
-            {QStringLiteral("pin-to-screen"), Quick::ScreenshotFixed},
+            {QStringLiteral("pin-to-screen"), Quick::ScreenshotPinToScreen},
             {QStringLiteral("text-recognition"), Quick::ScreenshotOcr},
             {QStringLiteral("text-translation"), Quick::ScreenshotTranslation},
             {QStringLiteral("record-screen"), Quick::ScreenRecord},
@@ -1916,7 +1925,7 @@ class ApplicationController::Impl {
 
     void dispatchAvailableQuickAction(presentation::GlobalShortcutAction action,
                                       QuickActionOrigin origin) {
-        if (origin == QuickActionOrigin::GlobalHotkey && screenshotController &&
+        if (origin == QuickActionOrigin::GlobalShortcut && screenshotController &&
             screenshotController->handleActiveScreenshotShortcut(action))
             return;
         switch (action) {
@@ -1930,7 +1939,7 @@ class ApplicationController::Impl {
                 controller->startDelayedCapture(storage::ScreenshotSettings().delaySeconds());
             }
             break;
-        case presentation::GlobalShortcutAction::ScreenshotFixed:
+        case presentation::GlobalShortcutAction::ScreenshotPinToScreen:
             if (ScreenshotController* controller = ensureScreenshotController()) {
                 controller->captureAndPinSelection();
             }
@@ -1952,6 +1961,12 @@ class ApplicationController::Impl {
                 controller->captureAndTranslateText();
             }
 #endif
+            break;
+        case presentation::GlobalShortcutAction::ScreenshotScrolling:
+            if (ScreenshotController* controller = ensureScreenshotController()) {
+                static_cast<void>(controller->captureForAction(
+                    ScreenshotController::CaptureAction::StartScrolling));
+            }
             break;
         case presentation::GlobalShortcutAction::ScreenshotCopy:
             if (ScreenshotController* controller = ensureScreenshotController()) {
@@ -2013,7 +2028,8 @@ class ApplicationController::Impl {
         case presentation::GlobalShortcutAction::StitchSelectedImages: {
             auto backend = platform::createSelectedFileBackend();
             const auto target = backend->captureTarget();
-            ensureCollageWindowCoordinator().presentSelectedFiles(std::move(backend), target);
+            ensureImageStitchingWindowCoordinator().presentSelectedFiles(std::move(backend),
+                                                                         target);
             break;
         }
         case presentation::GlobalShortcutAction::SplitSelectedImages: {
@@ -2061,9 +2077,9 @@ class ApplicationController::Impl {
                 controller->pinClipboardContentToScreen();
             }
             break;
-        case presentation::GlobalShortcutAction::ToggleGlobalHotkeys:
-            globalShortcutManager.setGlobalHotkeysEnabled(
-                !globalShortcutManager.globalHotkeysEnabled());
+        case presentation::GlobalShortcutAction::ToggleGlobalShortcuts:
+            globalShortcutManager.setGlobalShortcutsEnabled(
+                !globalShortcutManager.globalShortcutsEnabled());
             break;
         case presentation::GlobalShortcutAction::ToggleDisableOnFocusedFullscreenWindow: {
             storage::GlobalShortcutSettings shortcutSettings;
@@ -2117,7 +2133,7 @@ class ApplicationController::Impl {
             presentation::ImageSplitWindowServices services;
             services.requestPinnedSnapshot = pinnedImageSnapshotRequest();
             services.stitchToPdf = [this](presentation::ImageSplitSnapshot snapshot) {
-                return ensureCollageWindowCoordinator().presentSplitImagesAsPdf(
+                return ensureImageStitchingWindowCoordinator().presentSplitImagesAsPdf(
                     std::move(snapshot));
             };
             imageSplitWindowCoordinator =
@@ -2130,16 +2146,18 @@ class ApplicationController::Impl {
         return *imageSplitWindowCoordinator;
     }
 
-    presentation::CollageWindowCoordinator& ensureCollageWindowCoordinator() {
-        if (!collageWindowCoordinator) {
-            presentation::CollageWindowServices services;
+    presentation::ImageStitchingWindowCoordinator& ensureImageStitchingWindowCoordinator() {
+        if (!imageStitchingWindowCoordinator) {
+            presentation::ImageStitchingWindowServices services;
             services.requestPinnedSnapshot = pinnedImageSnapshotRequest();
-            collageWindowCoordinator =
-                std::make_unique<presentation::CollageWindowCoordinator>(&q, std::move(services));
-            QObject::connect(&app, &QCoreApplication::aboutToQuit, collageWindowCoordinator.get(),
-                             &presentation::CollageWindowCoordinator::shutdown);
+            imageStitchingWindowCoordinator =
+                std::make_unique<presentation::ImageStitchingWindowCoordinator>(
+                    &q, std::move(services));
+            QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                             imageStitchingWindowCoordinator.get(),
+                             &presentation::ImageStitchingWindowCoordinator::shutdown);
         }
-        return *collageWindowCoordinator;
+        return *imageStitchingWindowCoordinator;
     }
 
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
@@ -2305,7 +2323,7 @@ class ApplicationController::Impl {
     QThreadPool mcpSourceWorkers;
     int mcpSourceWork = 0;
     std::unique_ptr<presentation::DirectCaptureController> directCaptureController;
-    std::unique_ptr<presentation::CollageWindowCoordinator> collageWindowCoordinator;
+    std::unique_ptr<presentation::ImageStitchingWindowCoordinator> imageStitchingWindowCoordinator;
     std::unique_ptr<presentation::ImageSplitWindowCoordinator> imageSplitWindowCoordinator;
     std::unique_ptr<presentation::ImageEditingWindowCoordinator> imageEditingWindowCoordinator;
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION

@@ -167,8 +167,8 @@ class ShortcutSettings final {
     bool setScreenshot(const shortcuts::ShortcutBindingList& bindings) const;
     [[nodiscard]] shortcuts::ShortcutBindingList screenshotDelay() const;
     bool setScreenshotDelay(const shortcuts::ShortcutBindingList& bindings) const;
-    [[nodiscard]] shortcuts::ShortcutBindingList screenshotFixed() const;
-    bool setScreenshotFixed(const shortcuts::ShortcutBindingList& bindings) const;
+    [[nodiscard]] shortcuts::ShortcutBindingList screenshotPinToScreen() const;
+    bool setScreenshotPinToScreen(const shortcuts::ShortcutBindingList& bindings) const;
     [[nodiscard]] shortcuts::ShortcutBindingList screenshotOcr() const;
     bool setScreenshotOcr(const shortcuts::ShortcutBindingList& bindings) const;
     [[nodiscard]] shortcuts::ShortcutBindingList screenshotOcrCopy() const;
@@ -178,6 +178,8 @@ class ShortcutSettings final {
     bool setScreenshotTranslation(const shortcuts::ShortcutBindingList& bindings) const;
 #endif
 
+    [[nodiscard]] shortcuts::ShortcutBindingList screenshotScrolling() const;
+    bool setScreenshotScrolling(const shortcuts::ShortcutBindingList& bindings) const;
     [[nodiscard]] shortcuts::ShortcutBindingList screenshotCopy() const;
     bool setScreenshotCopy(const shortcuts::ShortcutBindingList& bindings) const;
     [[nodiscard]] shortcuts::ShortcutBindingList screenshotSave() const;
@@ -224,8 +226,8 @@ class ShortcutSettings final {
     [[nodiscard]] shortcuts::ShortcutBindingList toggleWindowUnderCursorAlwaysOnTop() const;
     bool
     setToggleWindowUnderCursorAlwaysOnTop(const shortcuts::ShortcutBindingList& bindings) const;
-    [[nodiscard]] shortcuts::ShortcutBindingList toggleGlobalHotkeys() const;
-    bool setToggleGlobalHotkeys(const shortcuts::ShortcutBindingList& bindings) const;
+    [[nodiscard]] shortcuts::ShortcutBindingList toggleGlobalShortcuts() const;
+    bool setToggleGlobalShortcuts(const shortcuts::ShortcutBindingList& bindings) const;
     [[nodiscard]] shortcuts::ShortcutBindingList toggleDisableOnFocusedFullscreenWindow() const;
     bool
     setToggleDisableOnFocusedFullscreenWindow(const shortcuts::ShortcutBindingList& bindings) const;
@@ -758,6 +760,8 @@ class NetworkSettings final {
   public:
     [[nodiscard]] QString proxy() const;
     bool setProxy(const QString& proxy) const;
+    [[nodiscard]] QString httpProxy() const;
+    bool setHttpProxy(const QString& address) const;
 };
 } // namespace snow_shot::storage
 

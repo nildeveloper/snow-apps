@@ -666,7 +666,7 @@ void session() {
             "current revision applies");
     QTemporaryDir coldOutput(QDir(QDir::tempPath()).canonicalPath() +
                              QStringLiteral("/mcp-save-XXXXXX"));
-    for (const auto* format : {"jpeg", "pdf"}) {
+    for (const auto* format : {"jpeg", "tiff", "pdf"}) {
         const QString coldPath = coldOutput.filePath(QString::fromLatin1(format) + u'.' + format);
         const auto saved = call(QStringLiteral("snow_shot_screenshot_save"),
                                 {{QStringLiteral("path"), coldPath},
@@ -689,6 +689,12 @@ void session() {
                         QString::fromLatin1(
                             QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()),
                 "non-PNG saves report their actual bytes without a canonical PNG encode");
+        if (QLatin1String(format) == QStringLiteral("tiff")) {
+            const auto decoded =
+                snow_shot::image_codec::decode(bytes, snow::image::Format::tiff, "saved.tiff");
+            require(decoded.size() == QSize(32, 20),
+                    "MCP TIFF output reopens through the native image codec");
+        }
     }
     const QString customPngPath = coldOutput.filePath(QStringLiteral("custom-compression.png"));
     for (int index = 0; index < 2; ++index) {
@@ -978,7 +984,7 @@ void annotationRuntime() {
     runtime.setDocumentChangedHandler({});
     require(runtime.undo() && changes == 4, "observation can be repeatedly detached");
 }
-void serialNumberPatchesPreserveMixedSelectionProperties(bool useWidget) {
+void sequenceNumberPatchesPreserveMixedSelectionProperties(bool useWidget) {
     SnowCanvasRuntime runtime;
     const auto created =
         QJsonDocument::fromJson(
@@ -1117,14 +1123,20 @@ void completeToolStyleContract() {
             properties = flags;
             ++updates;
         }
-        void setSerialNumberStyleFromToolbar(const SnowCanvasSerialNumberStyle& value,
-                                             quint32 flags) {
+        void setSequenceNumberStyleFromToolbar(const SnowCanvasSerialNumberStyle& value,
+                                               quint32 flags) {
             state.serialNumberStyle = value;
             properties = flags;
             ++updates;
         }
         bool setAngleStyleFromToolbar(const SnowCanvasAngleStyle& value, quint32 flags) {
             state.angleStyle = value;
+            properties = flags;
+            ++updates;
+            return true;
+        }
+        bool setBracketStyleFromToolbar(const SnowCanvasBracketStyle& value, quint32 flags) {
+            state.bracketStyle = value;
             properties = flags;
             ++updates;
             return true;
@@ -1138,6 +1150,12 @@ void completeToolStyleContract() {
         }
         bool setDistanceStyleFromToolbar(const SnowCanvasDistanceStyle& value, quint32 flags) {
             state.distanceStyle = value;
+            properties = flags;
+            ++updates;
+            return true;
+        }
+        bool setBracketStyleFromToolbar(const SnowCanvasBracketStyle& value, quint32 flags) {
+            state.bracketStyle = value;
             properties = flags;
             ++updates;
             return true;
@@ -1377,6 +1395,10 @@ int main(int argc, char** argv) {
         ScreenshotExportCoordinator::shared().shutdown();
         storage.shutdown();
     });
+    if (app.arguments().contains(QStringLiteral("--save-formats-only"))) {
+        session();
+        return 0;
+    }
     if (app.arguments().contains(QStringLiteral("--selection-style-only"))) {
         selectionStyle();
         return 0;
@@ -1398,8 +1420,8 @@ int main(int argc, char** argv) {
     }
     replaySubscriptions();
     sessionCompletionReentry();
-    serialNumberPatchesPreserveMixedSelectionProperties(false);
-    serialNumberPatchesPreserveMixedSelectionProperties(true);
+    sequenceNumberPatchesPreserveMixedSelectionProperties(false);
+    sequenceNumberPatchesPreserveMixedSelectionProperties(true);
     completeToolStyleContract();
     workflowOperations();
     annotationRuntime();

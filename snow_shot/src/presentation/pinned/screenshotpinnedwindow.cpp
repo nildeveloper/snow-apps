@@ -17,6 +17,7 @@
 #include "snow_shot/presentation/pinnedgeometry.h"
 #include "snow_shot/presentation/canvasstatusreadout.h"
 #include "snow_shot/presentation/screenshotpinnedwindow.h"
+#include "screenshotpinnedaccessibility.h"
 #include "snow_shot/presentation/screenshotquicktextannotationtoolbar.h"
 #include "screenshotpinnedcropgeometry.h"
 #include "snow_shot/presentation/livewindowsource.h"
@@ -553,9 +554,9 @@ class PinnedFileDropRouting final : public QObject {
 };
 
 // Keep the rim in physical pixels and above the canvas, independent of image rendering.
-class PinnedBorderFrame final : public QFrame {
+class PinnedDecorationFrame final : public QFrame {
   public:
-    explicit PinnedBorderFrame(QWidget* parent = nullptr) : QFrame(parent) {}
+    explicit PinnedDecorationFrame(QWidget* parent = nullptr) : QFrame(parent) {}
 
     void clearShadowCache() {
         m_shadowCache.clear();
@@ -609,12 +610,7 @@ class PinnedBorderFrame final : public QFrame {
         const auto geometry =
             deviceGeometry(surfaceTransform, borderOutline, property("cornerRadii").toSizeF(),
                            property("showBorder").toBool(), property("showShadow").toBool());
-        const int borderDevicePixels =
-            std::min({geometry.borderWidth, geometry.content.width(), geometry.content.height()});
-        const QRect contentRect = geometry.content;
-        const QRect outline = geometry.outline;
-        const QSizeF outlineRadii = geometry.radii;
-        if (contentRect.isEmpty() || (!geometry.showBorder && !geometry.showShadow))
+        if (geometry.content.isEmpty() || (!geometry.showBorder && !geometry.showShadow))
             return;
 
         // Neutralize the whole combined transform (world transform plus the
@@ -627,48 +623,18 @@ class PinnedBorderFrame final : public QFrame {
             return;
         }
         painter.setTransform(painter.transform() * toSurface);
-        if (geometry.showShadow) {
-            ScreenshotPinnedDecorationRenderer::renderShadow(
-                painter, outline, outlineRadii, geometry.shadowWidth,
-                property(kPinnedShadowColorProperty).value<QColor>(), geometry.outer,
-                m_shadowCache);
-        }
-        if (!geometry.showBorder)
-            return;
-        const QRectF outer = outline;
-        const qreal rx = std::min(outlineRadii.width(), outer.width() / 2.0);
-        const qreal ry = std::min(outlineRadii.height(), outer.height() / 2.0);
-        QPainterPath ring;
-        ring.setFillRule(Qt::OddEvenFill);
-        ring.addRoundedRect(outer, rx, ry);
-        const QRectF inner = outer.adjusted(borderDevicePixels, borderDevicePixels,
-                                            -borderDevicePixels, -borderDevicePixels);
-        if (inner.isValid()) {
-            ring.addRoundedRect(inner, std::max(0.0, rx - borderDevicePixels),
-                                std::max(0.0, ry - borderDevicePixels));
-        }
-        painter.setClipRect(contentRect);
-        painter.setRenderHint(QPainter::Antialiasing, rx > 0 && ry > 0);
-        painter.fillPath(ring, color);
+        ScreenshotPinnedDecorationStyle style;
+        style.borderWidth = geometry.showBorder ? geometry.borderWidth : 0;
+        style.borderColor = color;
+        style.shadowWidth = geometry.showShadow ? geometry.shadowWidth : 0;
+        style.shadowColor = property(kPinnedShadowColorProperty).value<QColor>();
         if (property("cropped").toBool()) {
-            // Follow the same rim through rounded corners. Grow past large radii, and let
-            // opposite corners meet on small pins without painting translucent colors twice.
-            const qreal minimumExtent = 30 * devicePixelRatioF();
-            const int extentX = std::min(qCeil(std::max(minimumExtent, rx + borderDevicePixels)),
-                                         (outline.width() + 1) / 2);
-            const int extentY = std::min(qCeil(std::max(minimumExtent, ry + borderDevicePixels)),
-                                         (outline.height() + 1) / 2);
-            QRegion corners;
-            for (const auto& point :
-                 {outline.topLeft(), QPoint(outline.x() + outline.width() - extentX, outline.y()),
-                  QPoint(outline.x(), outline.y() + outline.height() - extentY),
-                  QPoint(outline.x() + outline.width() - extentX,
-                         outline.y() + outline.height() - extentY)})
-                corners += QRect(point, QSize(extentX, extentY));
+            style.cropMarkerExtent = qCeil(30 * devicePixelRatioF());
             const QColor marker = property("cropMarkerColor").value<QColor>();
-            painter.setClipRegion(corners, Qt::IntersectClip);
-            painter.fillPath(ring, marker.isValid() ? marker : QColor(128, 128, 128));
+            style.cropMarkerColor = marker.isValid() ? marker : QColor(128, 128, 128);
         }
+        ScreenshotPinnedDecorationRenderer::render(painter, geometry.outline, geometry.radii, style,
+                                                   geometry.outer, m_shadowCache);
     }
 
   private:
@@ -734,24 +700,9 @@ class PinnedBorderFrame final : public QFrame {
     }
 
     QRegion decorationDamage(const DecorationState& state) const {
-        if ((!state.showBorder && !state.showShadow) || state.outline.isEmpty())
-            return {};
-        const int exterior = (state.showShadow ? state.shadowWidth : 0) + 1;
-        const int interior = (state.showBorder ? state.borderWidth : 0) + 1;
-        QRegion deviceDamage(state.outline.adjusted(-exterior, -exterior, exterior, exterior));
-        const QRectF inner =
-            QRectF(state.outline).adjusted(interior, interior, -interior, -interior);
-        if (!inner.isEmpty()) {
-            QPainterPath safeInterior;
-            const qreal rx = std::max(0.0, state.radii.width() - interior);
-            const qreal ry = std::max(0.0, state.radii.height() - interior);
-            if (rx > 0 && ry > 0)
-                safeInterior.addRoundedRect(inner, rx, ry, Qt::AbsoluteSize);
-            else
-                safeInterior.addRect(inner);
-            deviceDamage -= QRegion(safeInterior.toFillPolygon().toPolygon());
-        }
-        deviceDamage &= state.outer;
+        const QRegion deviceDamage = ScreenshotPinnedDecorationRenderer::damageRegion(
+            state.outline, state.radii, state.showBorder ? state.borderWidth : 0,
+            state.showShadow ? state.shadowWidth : 0, state.outer);
         QRegion logicalDamage;
         for (const QRect& band : deviceDamage) {
             logicalDamage += QRectF(band.x() / state.dpr, band.y() / state.dpr,
@@ -974,6 +925,7 @@ ScreenshotPinnedWindow::ScreenshotPinnedWindow(QWidget* parent)
       m_shortcutManager(std::make_unique<snow_shot::presentation::WindowShortcutManager>()),
       m_physicalCursor(std::make_unique<snow_shot::platform::PhysicalCursor>()), m_exportArtifact(),
       m_nativeGeometryController(std::make_unique<ScreenshotPinnedNativeGeometryController>()) {
+    m_accessibility = std::make_unique<ScreenshotPinnedAccessibility>(*this);
     snow_shot::presentation::installWindowCloseShortcut(this, [this] { requestUserClose(); });
     m_platform->setResizeInteractionState(&m_systemSizingActive);
     m_platform->stackingChanged = [this] {
@@ -1661,6 +1613,7 @@ ScreenshotPinnedWindow::~ScreenshotPinnedWindow() {
     m_platform->stackingActivated = {};
     stopLiveSource();
     m_destroying = true;
+    m_accessibility.reset();
     destroyQuickTextAnnotationToolbar();
     endWindowShake(true);
     if (m_scaleLabel)
@@ -1978,7 +1931,7 @@ void ScreenshotPinnedWindow::restorePersistentState(const Config& config) {
         m_cropRect.reset();
     m_recognitionEmptyViewportVisibility.reset();
     if (m_borderFrame != nullptr)
-        static_cast<PinnedBorderFrame*>(m_borderFrame)->clearShadowCache();
+        static_cast<PinnedDecorationFrame*>(m_borderFrame)->clearShadowCache();
     m_lockedMode = config.restorePersistentState && config.persistedLockedMode &&
                    !config.persistedThumbnailMode && !config.persistedHideToTopMode;
     if (m_scaleLabel) {
@@ -2162,6 +2115,13 @@ bool ScreenshotPinnedWindow::event(QEvent* event) {
             static_cast<void>(setClickThroughMode(false));
         }
     }
+    if (m_accessibility && event &&
+        (event->type() == QEvent::Show || event->type() == QEvent::Hide ||
+         event->type() == QEvent::Move || event->type() == QEvent::Resize ||
+         event->type() == QEvent::WindowStateChange ||
+         event->type() == QEvent::DevicePixelRatioChange ||
+         event->type() == QEvent::LanguageChange))
+        m_accessibility->update(event->type() == QEvent::LanguageChange);
     return handled;
 }
 
@@ -2662,6 +2622,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
     }
     static_cast<void>(m_nativeGeometryController->commitTarget());
     m_presented = true;
+    m_accessibility->update();
     refreshColorSwatch();
     if (m_selectionController && !isLiveWindow())
         m_selectionController->registerWindow(this);
@@ -3358,7 +3319,7 @@ void ScreenshotPinnedWindow::createUi() {
     connect(m_canvas, &SnowCanvasWidget::spotlightPreviewApplied, this, invalidateEditedCopy);
     layout->addWidget(m_canvas);
 
-    m_borderFrame = new PinnedBorderFrame(this);
+    m_borderFrame = new PinnedDecorationFrame(this);
     m_borderFrame->setObjectName(QStringLiteral("screenshotPinnedBorder"));
     m_borderFrame->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     m_borderFrame->setGeometry(rect());
@@ -3668,8 +3629,8 @@ void ScreenshotPinnedWindow::createContextMenu() {
     connect(saveAction, &QAction::triggered, this, &ScreenshotPinnedWindow::saveAsFile);
 
     if (isLiveWindow()) {
-        auto* convert = m_contextMenu->addItem(tr("Convert to Image"), outlined_icons::FileImage());
-        setActionTranslationSource(convert, "Convert to Image");
+        auto* convert = m_contextMenu->addItem(tr("Convert to image"), outlined_icons::FileImage());
+        setActionTranslationSource(convert, "Convert to image");
         convert->setObjectName(QStringLiteral("screenshotPinnedConvertToImageAction"));
         convert->setProperty("liveCommand", QStringLiteral("convert_to_image"));
         connect(convert, &QAction::triggered, this, &ScreenshotPinnedWindow::convertLiveToImage);
@@ -3910,7 +3871,7 @@ void ScreenshotPinnedWindow::createContextMenu() {
             processMenu->addSeparator();
             m_splitImageAction = processMenu->addItem(
                 QCoreApplication::translate(
-                    "ImageSplitWindow", QT_TRANSLATE_NOOP("ImageSplitWindow", "Image Splitting")),
+                    "ImageSplitWindow", QT_TRANSLATE_NOOP("ImageSplitWindow", "Image splitting")),
                 custom_outlined_icons::ImageSplitting());
             m_splitImageAction->setObjectName(QStringLiteral("screenshotPinnedSplitImageAction"));
             m_splitImageAction->setProperty("liveCommand", QStringLiteral("split_image"));
@@ -3926,8 +3887,8 @@ void ScreenshotPinnedWindow::createContextMenu() {
                 });
             });
             m_imageEditingAction =
-                processMenu->addItem(tr("Image Editing"), custom_outlined_icons::ImageEditing());
-            setActionTranslationSource(m_imageEditingAction, "Image Editing");
+                processMenu->addItem(tr("Image editing"), custom_outlined_icons::ImageEditing());
+            setActionTranslationSource(m_imageEditingAction, "Image editing");
             m_imageEditingAction->setObjectName(
                 QStringLiteral("screenshotPinnedImageEditingAction"));
             m_imageEditingAction->setProperty("liveCommand", QStringLiteral("image_editing"));
@@ -3947,8 +3908,8 @@ void ScreenshotPinnedWindow::createContextMenu() {
         outlined_icons::Picture());
     setActionTranslationSource(processAction, "Process image");
     m_applyCropAction =
-        m_contextMenu->addItem(tr("Apply Crop"), custom_outlined_icons::ApplyCrop());
-    setActionTranslationSource(m_applyCropAction, "Apply Crop");
+        m_contextMenu->addItem(tr("Apply crop"), custom_outlined_icons::ApplyCrop());
+    setActionTranslationSource(m_applyCropAction, "Apply crop");
     m_applyCropAction->setObjectName(QStringLiteral("screenshotPinnedApplyCropAction"));
     m_applyCropAction->setProperty("liveCommand", QStringLiteral("apply_crop"));
     connect(m_applyCropAction, &QAction::triggered, this, &ScreenshotPinnedWindow::applyCrop);
@@ -3976,8 +3937,8 @@ void ScreenshotPinnedWindow::createContextMenu() {
         connect(m_thumbnailAction, &QAction::toggled, this,
                 [this](bool enabled) { setThumbnailMode(enabled); });
 
-        m_hideToTopAction = m_contextMenu->addItem(tr("Hide to Top"), outlined_icons::ArrowUp());
-        setActionTranslationSource(m_hideToTopAction, "Hide to Top");
+        m_hideToTopAction = m_contextMenu->addItem(tr("Hide at top"), outlined_icons::ArrowUp());
+        setActionTranslationSource(m_hideToTopAction, "Hide at top");
         m_hideToTopAction->setObjectName(QStringLiteral("screenshotPinnedHideToTopAction"));
         m_hideToTopAction->setCheckable(true);
         connect(m_hideToTopAction, &QAction::triggered, this,
@@ -3999,13 +3960,13 @@ void ScreenshotPinnedWindow::createContextMenu() {
     connect(m_lockAction, &QAction::toggled, this, &ScreenshotPinnedWindow::setLockedMode);
 
     auto* managementAction = m_contextMenu->addLazySubMenu(
-        tr("Window Management"),
+        tr("Pin to screen management"),
         [this](auto* windowManagementMenu) {
             windowManagementMenu->setObjectName(
                 QStringLiteral("screenshotPinnedWindowManagementMenu"));
             m_alwaysOnTopAction =
-                windowManagementMenu->addItem(tr("Always on Top"), outlined_icons::ToTop());
-            setActionTranslationSource(m_alwaysOnTopAction, "Always on Top");
+                windowManagementMenu->addItem(tr("Always on top"), outlined_icons::ToTop());
+            setActionTranslationSource(m_alwaysOnTopAction, "Always on top");
             m_alwaysOnTopAction->setObjectName(QStringLiteral("screenshotPinnedAlwaysOnTopAction"));
             m_alwaysOnTopAction->setCheckable(true);
             connect(m_alwaysOnTopAction, &QAction::triggered, this,
@@ -4027,9 +3988,9 @@ void ScreenshotPinnedWindow::createContextMenu() {
             if (!isLiveWindow()) {
                 windowManagementMenu->addSeparator();
                 auto* batch = windowManagementMenu->addLazySubMenu(
-                    tr("Batch Actions"), [this](auto* menu) { createBatchActionsMenu(menu); },
+                    tr("Batch actions"), [this](auto* menu) { createBatchActionsMenu(menu); },
                     outlined_icons::Appstore());
-                setActionTranslationSource(batch, "Batch Actions");
+                setActionTranslationSource(batch, "Batch actions");
                 batch->setObjectName(QStringLiteral("screenshotPinnedBatchActionsAction"));
                 m_loadContentAction = windowManagementMenu->addLazySubMenu(
                     tr("Load new content"),
@@ -4090,7 +4051,7 @@ void ScreenshotPinnedWindow::createContextMenu() {
             refreshContextMenu();
         },
         outlined_icons::Apartment());
-    setActionTranslationSource(managementAction, "Window Management");
+    setActionTranslationSource(managementAction, "Pin to screen management");
     managementAction->setObjectName(QStringLiteral("screenshotPinnedWindowManagementAction"));
 
     m_contextMenu->addSeparator();
@@ -4148,7 +4109,7 @@ void ScreenshotPinnedWindow::applyRuntimeBorderColor() {
                           : (m_windowActive || m_fileDragActive)
                               ? configuredPinnedShadowActiveColor()
                               : configuredPinnedShadowColor();
-    static_cast<PinnedBorderFrame*>(m_borderFrame)->updateColors(color, shadow);
+    static_cast<PinnedDecorationFrame*>(m_borderFrame)->updateColors(color, shadow);
 }
 
 void ScreenshotPinnedWindow::updateShowMainInterfaceAction() {
@@ -4196,7 +4157,7 @@ void ScreenshotPinnedWindow::refreshContextMenu() {
                                                 : tr("Default")));
     }
     if (m_splitImageAction != nullptr) {
-        const QString label = QCoreApplication::translate("ImageSplitWindow", "Image Splitting");
+        const QString label = QCoreApplication::translate("ImageSplitWindow", "Image splitting");
         m_splitImageAction->setText(label);
         m_splitImageAction->setToolTip(label);
         m_splitImageAction->setEnabled(
@@ -4208,7 +4169,7 @@ void ScreenshotPinnedWindow::refreshContextMenu() {
                                         !m_closing);
     }
     if (m_imageEditingAction != nullptr) {
-        const QString label = tr("Image Editing");
+        const QString label = tr("Image editing");
         m_imageEditingAction->setText(label);
         m_imageEditingAction->setToolTip(label);
         m_imageEditingAction->setEnabled(liveCommandAllowed(QStringLiteral("image_editing")) &&
@@ -4337,7 +4298,7 @@ void ScreenshotPinnedWindow::rebuildGroupMenu() {
     m_groupMenu->clear();
     snow_shot::presentation::PinnedWindowGroupManager* manager = m_groupManager;
     if (manager == nullptr) {
-        m_groupMenu->menuAction()->setText(tr("Group: Default"));
+        m_groupMenu->menuAction()->setText(tr("Group: default"));
         QAction* current = m_groupMenu->addItem(tr("Default"));
         current->setCheckable(true);
         current->setChecked(true);
@@ -4361,18 +4322,18 @@ void ScreenshotPinnedWindow::rebuildGroupMenu() {
                 [this, manager, groupId = group.id]() { manager->moveWindow(this, groupId); });
     }
     m_groupMenu->addSeparator();
-    QAction* newGroup = m_groupMenu->addItem(tr("New Group"), outlined_icons::FolderAdd());
+    QAction* newGroup = m_groupMenu->addItem(tr("New group"), outlined_icons::FolderAdd());
     newGroup->setObjectName(QStringLiteral("screenshotPinnedNewGroupAction"));
     connect(newGroup, &QAction::triggered, this,
             [this, manager]() { manager->openCreateGroupModal(this, this); });
-    QAction* deleteEmpty = m_groupMenu->addItem(tr("Delete Empty Groups"), outlined_icons::Clear());
+    QAction* deleteEmpty = m_groupMenu->addItem(tr("Delete empty groups"), outlined_icons::Clear());
     deleteEmpty->setObjectName(QStringLiteral("screenshotPinnedDeleteEmptyGroupsAction"));
     deleteEmpty->setEnabled(hasDeletableEmptyGroups);
     connect(deleteEmpty, &QAction::triggered, this,
             [this, manager]() { manager->openDeleteEmptyGroupsConfirmation(this); });
 
     auto* deleteSpecified = m_groupMenu->addLazySubMenu(
-        tr("Delete Specified Group"),
+        tr("Delete specified group"),
         [this, manager](auto* menu) {
             menu->setObjectName(QStringLiteral("screenshotPinnedDeleteSpecifiedGroupMenu"));
             menu->setMinimumWidth(300);
@@ -4543,7 +4504,7 @@ void ScreenshotPinnedWindow::updateBorderOutline() {
         borderOutline = {};
         cornerRadii = QSizeF(0, 0);
     }
-    static_cast<PinnedBorderFrame*>(m_borderFrame)
+    static_cast<PinnedDecorationFrame*>(m_borderFrame)
         ->updateDecoration(borderOutline, cornerRadii, m_showBorder || m_cropRect.has_value(),
                            m_showShadow && !m_cropRect);
 
@@ -5905,18 +5866,18 @@ void ScreenshotPinnedWindow::configureRecognitionSession() {
                     m_screenshotRenderer->setOcrFilteredImage(std::move(filteredImage), canvasRect);
                 }
             },
-            [this](int lineIndex, const QString& text) {
+            [this](int lineIndex, const QString& text, bool streaming) {
                 const bool changed = m_originalOcrPresentation && lineIndex >= 0 &&
                                      lineIndex < m_originalOcrPresentation->lines.size() &&
                                      m_originalOcrPresentation->lines[lineIndex].text != text;
                 if (m_originalOcrPresentation != nullptr) {
-                    m_originalOcrPresentation->setLineText(lineIndex, text);
+                    m_originalOcrPresentation->setLineText(lineIndex, text, streaming);
                 }
                 if (m_displayOcrPresentation != nullptr) {
-                    m_displayOcrPresentation->setLineText(lineIndex, text);
+                    m_displayOcrPresentation->setLineText(lineIndex, text, streaming);
                 }
                 if (m_recognitionContent != nullptr) {
-                    m_recognitionContent->updateOcrText(lineIndex, text);
+                    m_recognitionContent->updateOcrText(lineIndex, text, streaming);
                 }
                 if (changed)
                     clearTextAnnotations();
@@ -6314,7 +6275,7 @@ void ScreenshotPinnedWindow::copyEditToolbarContent() {
         showPinnedRecognitionMessage(
             this,
             QCoreApplication::translate("ScreenshotController",
-                                        "No recognized result is available to copy"),
+                                        "No recognition result is available to copy"),
             true);
         return;
     }
@@ -6628,7 +6589,7 @@ ScreenshotPinnedWindow::renderedImageSnapshot(ViewportExportMode mode) {
                 const QRectF rect = m_cropRect ? exportVisibleCanvasRect() : backgroundRect;
                 const QSize size(std::max(1, qRound(rect.width() * surfaceScale)),
                                  std::max(1, qRound(rect.height() * surfaceScale)));
-                QImage image = snow_shot::presentation::captureCollageImage(
+                QImage image = snow_shot::presentation::captureImageStitchingImage(
                     size,
                     [&] {
                         return m_recognitionContent->printViewportSnapshot(
@@ -9360,6 +9321,8 @@ bool ScreenshotPinnedWindow::applyAndVerifyNativeGeometry(const QRect& target) {
 void ScreenshotPinnedWindow::commitNativeGeometry(bool adoptScale) {
     m_platformPlacement = m_platform->placement();
     const auto change = m_nativeGeometryController->commitTarget();
+    if (m_accessibility)
+        m_accessibility->update();
     if (change.sizeChanged || change.dpiChanged) {
         if (adoptScale)
             m_preserveScaleForSettledGeometry = false;
@@ -9539,14 +9502,14 @@ void ScreenshotPinnedWindow::createBatchActionsMenu(adqt::widgets::AdContextMenu
         connect(action, &QAction::triggered, this, std::move(callback));
         return action;
     };
-    add(tr("Select All"), "Select All", "screenshotPinnedBatchSelectAllAction",
+    add(tr("Select all"), "Select all", "screenshotPinnedBatchSelectAllAction",
         [this] { selectAllDisplayedPinnedWindows(); });
-    add(tr("Image Stitching"), "Image Stitching", "screenshotPinnedBatchImageStitchingAction",
+    add(tr("Image stitching"), "Image stitching", "screenshotPinnedBatchImageStitchingAction",
         [this] { stitchDisplayedPinnedWindows(); });
-    add(tr("Copy Files to Clipboard"), "Copy Files to Clipboard",
+    add(tr("Copy files to clipboard"), "Copy files to clipboard",
         "screenshotPinnedBatchCopyFilesToClipboardAction",
         [this] { copyPinnedWindowFiles(displayedPinnedWindows()); });
-    add(tr("Save as File"), "Save as File", "screenshotPinnedBatchSaveAsFileAction",
+    add(tr("Save as file"), "Save as file", "screenshotPinnedBatchSaveAsFileAction",
         [this] { saveDisplayedPinnedWindows(); });
     menu->addSeparator();
     const auto apply = [this](auto operation) {
@@ -9555,33 +9518,33 @@ void ScreenshotPinnedWindow::createBatchActionsMenu(adqt::widgets::AdContextMenu
             if (window && !window->m_closing)
                 operation(*window);
     };
-    add(tr("Enable Thumbnail Mode"), "Enable Thumbnail Mode",
+    add(tr("Enable thumbnail mode"), "Enable thumbnail mode",
         "screenshotPinnedBatchEnableThumbnailAction", [apply] {
             apply([](auto& window) {
                 if (!window.m_thumbnailMode)
                     window.setThumbnailMode(true);
             });
         });
-    add(tr("Disable Thumbnail Mode"), "Disable Thumbnail Mode",
+    add(tr("Disable thumbnail mode"), "Disable thumbnail mode",
         "screenshotPinnedBatchDisableThumbnailAction",
         [apply] { apply([](auto& window) { window.setThumbnailMode(false); }); });
-    add(tr("Enable Hide to Top"), "Enable Hide to Top",
+    add(tr("Enable hide at top"), "Enable hide at top",
         "screenshotPinnedBatchEnableHideToTopAction", [apply] {
             apply([](auto& window) {
                 if (!window.hideToTopActive())
                     window.toggleHideToTop();
             });
         });
-    add(tr("Disable Hide to Top"), "Disable Hide to Top",
+    add(tr("Disable hide at top"), "Disable hide at top",
         "screenshotPinnedBatchDisableHideToTopAction", [apply] {
             apply([](auto& window) {
                 if (window.hideToTopActive())
                     window.toggleHideToTop();
             });
         });
-    add(tr("Enable Lock Mode"), "Enable Lock Mode", "screenshotPinnedBatchEnableLockAction",
+    add(tr("Enable lock mode"), "Enable lock mode", "screenshotPinnedBatchEnableLockAction",
         [apply] { apply([](auto& window) { window.setLockedMode(true); }); });
-    add(tr("Disable Lock Mode"), "Disable Lock Mode", "screenshotPinnedBatchDisableLockAction",
+    add(tr("Disable lock mode"), "Disable lock mode", "screenshotPinnedBatchDisableLockAction",
         [apply] { apply([](auto& window) { window.setLockedMode(false); }); });
     menu->addSeparator();
     add(tr("Close"), "Close", "screenshotPinnedBatchCloseAction",

@@ -67,6 +67,7 @@ class UpdateService final : public QObject {
     void start();
     void setMode(const QString& mode);
     void setSystemProxy(bool enabled);
+    void setProxyConfiguration(const QString& mode, const QString& address);
     void setProgressAppearance(const QJsonObject& appearance);
     void check(bool manual = true);
     void download();

@@ -637,7 +637,7 @@ PinnedWindowManagementPageWidget::PinnedWindowManagementPageWidget(
             connect(m_batchStitchAction, &QAction::triggered, this, [this] {
                 const QStringList selected = selectedRecordIds();
                 if (!selected.isEmpty())
-                    emit collageRequested(selected);
+                    emit stitchImagesRequested(selected);
             });
             connect(m_batchPinAction, &QAction::triggered, this, [this] {
                 if (m_source && selectedGroupId())
@@ -894,7 +894,7 @@ void PinnedWindowManagementPageWidget::rebuildEntries() {
             auto* status = row->metadataLabel();
             status->setText(record.ignored  ? tr("Closed")
                             : record.hidden ? tr("Hidden")
-                                            : tr("Not Closed"));
+                                            : tr("Not closed"));
             status->setObjectName(QStringLiteral("pinnedManagementStatus"));
             auto* show = new adqt::widgets::AdButton(details);
             show->setObjectName(QStringLiteral("pinnedManagementEntryShow"));
@@ -920,17 +920,17 @@ void PinnedWindowManagementPageWidget::rebuildEntries() {
                     auto* menu = new adqt::widgets::AdContextMenu(row);
                     menu->setObjectName(QStringLiteral("pinnedManagementEntryMoreMenu"));
                     auto* stitch =
-                        menu->addItem(tr("Stitch Image"),
+                        menu->addItem(tr("Stitch images"),
                                       presentation::icons::custom::outlined::ImageStitching());
                     stitch->setObjectName(QStringLiteral("pinnedManagementEntryStitch"));
-                    stitch->setToolTip(tr("Stitch Image"));
-                    const QString splitLabel = tr("Image Splitting");
+                    stitch->setToolTip(tr("Stitch images"));
+                    const QString splitLabel = tr("Image splitting");
                     auto* split = menu->addItem(
                         splitLabel, presentation::icons::custom::outlined::ImageSplitting());
                     split->setObjectName(QStringLiteral("pinnedManagementEntrySplit"));
                     split->setToolTip(splitLabel);
                     auto* imageEditing = menu->addItem(
-                        tr("Image Editing"), presentation::icons::custom::outlined::ImageEditing());
+                        tr("Image editing"), presentation::icons::custom::outlined::ImageEditing());
                     imageEditing->setObjectName(
                         QStringLiteral("pinnedManagementEntryImageEditing"));
                     imageEditing->setToolTip(imageEditing->text());
@@ -957,7 +957,7 @@ void PinnedWindowManagementPageWidget::rebuildEntries() {
                             history_page::showRevealFailure(this);
                     });
                     connect(stitch, &QAction::triggered, row,
-                            [this, id] { emit collageRequested({id}); });
+                            [this, id] { emit stitchImagesRequested({id}); });
                     connect(split, &QAction::triggered, row,
                             [this, id] { emit splitRequested(id); });
                     return menu;
@@ -1021,7 +1021,7 @@ void PinnedWindowManagementPageWidget::rebuildEntries() {
         row->findChild<QLabel*>(QStringLiteral("pinnedManagementStatus"))
             ->setText(record.ignored  ? tr("Closed")
                       : record.hidden ? tr("Hidden")
-                                      : tr("Not Closed"));
+                                      : tr("Not closed"));
         row->findChild<adqt::widgets::AdButton*>(QStringLiteral("pinnedManagementEntryShow"))
             ->setText(record.ignored ? tr("Restore") : tr("Show"));
         auto* more =
@@ -1044,17 +1044,17 @@ void PinnedWindowManagementPageWidget::rebuildEntries() {
         }
         for (auto* stitch :
              row->findChildren<QAction*>(QStringLiteral("pinnedManagementEntryStitch"))) {
-            stitch->setText(tr("Stitch Image"));
-            stitch->setToolTip(tr("Stitch Image"));
+            stitch->setText(tr("Stitch images"));
+            stitch->setToolTip(tr("Stitch images"));
         }
         for (auto* action :
              row->findChildren<QAction*>(QStringLiteral("pinnedManagementEntryImageEditing"))) {
-            action->setText(tr("Image Editing"));
+            action->setText(tr("Image editing"));
             action->setToolTip(action->text());
         }
         for (auto* split :
              row->findChildren<QAction*>(QStringLiteral("pinnedManagementEntrySplit"))) {
-            const QString label = tr("Image Splitting");
+            const QString label = tr("Image splitting");
             split->setText(label);
             split->setToolTip(label);
         }
@@ -1129,7 +1129,7 @@ std::optional<QString> PinnedWindowManagementPageWidget::selectedGroupId() const
 void PinnedWindowManagementPageWidget::updateBatchActions() {
     m_batchActionsButton->setEnabled(!m_selected.isEmpty());
     if (m_batchStitchAction) {
-        m_batchStitchAction->setText(tr("Stitch Image"));
+        m_batchStitchAction->setText(tr("Stitch images"));
         m_batchStitchAction->setToolTip(m_batchStitchAction->text());
         m_batchStitchAction->setEnabled(!m_selected.isEmpty());
     }
@@ -1205,7 +1205,7 @@ void PinnedWindowManagementPageWidget::requestDeleteAll() {
 }
 
 void PinnedWindowManagementPageWidget::retranslateUi() {
-    m_title->setText(tr("Pin to Screen Management"));
+    m_title->setText(tr("Pin to screen management"));
     m_sourceFilter->setPlaceholder(tr("All sources"));
     m_sourceFilter->setAccessibleName(tr("Source"));
     const auto selectedSources = m_sourceFilter->currentValues();
@@ -1226,9 +1226,9 @@ void PinnedWindowManagementPageWidget::retranslateUi() {
     m_deleteSelected->setText(tr("Delete"));
     m_deleteSelected->setToolTip(tr("Delete selected pinned windows"));
     m_deleteSelected->setAccessibleName(tr("Delete selected pinned windows"));
-    m_batchActionsButton->setText(tr("Batch Actions"));
-    m_batchActionsButton->setToolTip(tr("Batch Actions"));
-    m_batchActionsButton->setAccessibleName(tr("Batch Actions"));
+    m_batchActionsButton->setText(tr("Batch actions"));
+    m_batchActionsButton->setToolTip(tr("Batch actions"));
+    m_batchActionsButton->setAccessibleName(tr("Batch actions"));
     updateBatchActions();
     m_selectPage->setText(tr("Select all"));
     m_selectPage->setToolTip(tr("Select all entries on this page"));

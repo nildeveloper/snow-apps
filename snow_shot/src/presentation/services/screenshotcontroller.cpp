@@ -88,6 +88,7 @@
 #include "snow_shot/presentation/screenshotmessageservice.h"
 #include "snow_shot/presentation/screenshotocrcontroller.h"
 #include "snow_shot/presentation/screenshotocrrecognitionservice.h"
+#include "snow_shot/presentation/screenshotocrproxyconfiguration.h"
 #include "snow_shot/presentation/screenshotqrrecognitionservice.h"
 #include "snow_shot/presentation/screenshotselectioneditworkflow.h"
 #include "snow_shot/presentation/screenshotselectionexportuiservices.h"
@@ -140,9 +141,6 @@
 #include <QSet>
 #include <QUrl>
 #include <QMimeData>
-#include <QNetworkProxy>
-#include <QNetworkProxyFactory>
-#include <QNetworkProxyQuery>
 #include <QTimer>
 #include <QWindow>
 
@@ -195,33 +193,6 @@ template <typename Function> class ScopeExit final {
 
 template <typename Function> ScopeExit<Function> makeScopeExit(Function function) {
     return ScopeExit<Function>(std::move(function));
-}
-
-QString resolvedOcrProxyUrl(const QString& proxyMode) {
-    if (proxyMode != QStringLiteral("system")) {
-        return {};
-    }
-    const QNetworkProxyQuery query(QUrl(QStringLiteral("https://www.modelscope.cn/")));
-    const QList<QNetworkProxy> proxies = QNetworkProxyFactory::systemProxyForQuery(query);
-    for (const QNetworkProxy& proxy : proxies) {
-        if (proxy.type() != QNetworkProxy::HttpProxy &&
-            proxy.type() != QNetworkProxy::Socks5Proxy) {
-            continue;
-        }
-        QUrl url;
-        url.setScheme(proxy.type() == QNetworkProxy::Socks5Proxy ? QStringLiteral("socks5")
-                                                                 : QStringLiteral("http"));
-        url.setHost(proxy.hostName());
-        url.setPort(proxy.port());
-        if (!proxy.user().isEmpty()) {
-            url.setUserName(proxy.user());
-        }
-        if (!proxy.password().isEmpty()) {
-            url.setPassword(proxy.password());
-        }
-        return url.toString(QUrl::FullyEncoded);
-    }
-    return {};
 }
 
 ScreenshotToolPalette::Tool paletteToolForActiveTool(ScreenshotActiveTool tool) {
@@ -301,7 +272,6 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void handleCapturePresented();
     void invalidateDelayedCapture();
     void resetPendingCaptureRequest();
-    [[nodiscard]] bool finalizeSelectionAspectRatio();
     [[nodiscard]] bool beginCapture(
         PendingSelectionAction action = PendingSelectionAction::None,
         ScreenshotCaptureWorkflow::StartMode mode = ScreenshotCaptureWorkflow::StartMode::Normal);
@@ -426,9 +396,9 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void setDistanceTool() override;
     void setAngleTool() override;
     void setBracketTool() override;
-    void setFreeDrawTool() override;
+    void setBrushTool() override;
     void setHighlightTool() override;
-    void setPenHighlightTool() override;
+    void setBrushHighlightTool() override;
     void setSpotlightTool() override;
     void setMagnifierTool() override;
     void setEraserTool() override;
@@ -436,7 +406,7 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void setBrushEraserTool() override;
     void setFilterTool() override;
     void setRectangleFilterTool() override;
-    void setPenFilterTool() override;
+    void setBrushFilterTool() override;
     void setAutoFilterTool() override;
     void fillAutoFilterCategory(const QString& category) override {
         if (m_autoFilterController) {
@@ -450,7 +420,7 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void previewWatermarkFromToolbar(const SnowCanvasWatermarkConfig& config) override;
     void setFilterStyleFromToolbar(const SnowCanvasFilterStyle& style, quint32 properties) override;
     void setTextTool() override;
-    void setSerialNumberTool() override;
+    void setSequenceNumberTool() override;
     void setOcrTool() override;
     void setTextTranslationTool() override;
     void setTableTool() override;
@@ -583,12 +553,12 @@ struct ScreenshotController::Impl final : public ScreenshotToolbarCommandSink,
     void setShapeStyleFromToolbar(const SnowCanvasShapeStyle& style, quint32 properties,
                                   SnowCanvasShapeKind kind) override;
     void setTextStyleFromToolbar(const SnowCanvasTextStyle& style, quint32 properties) override;
-    void setSerialNumberStyleFromToolbar(const SnowCanvasSerialNumberStyle& style) override;
-    void setSerialNumberStyleFromToolbar(const SnowCanvasSerialNumberStyle& style,
-                                         quint32 properties);
-    void decrementSelectedSerialNumbers() override;
-    void incrementSelectedSerialNumbers() override;
-    void createTextForSelectedSerialNumber() override;
+    void setSequenceNumberStyleFromToolbar(const SnowCanvasSerialNumberStyle& style) override;
+    void setSequenceNumberStyleFromToolbar(const SnowCanvasSerialNumberStyle& style,
+                                           quint32 properties);
+    void decrementSelectedSequenceNumbers() override;
+    void incrementSelectedSequenceNumbers() override;
+    void createTextForSelectedSequenceNumber() override;
     void reorderSelectedElements(SnowCanvasSelectionOrder order) override;
     void alignSelectedElements(SnowCanvasSelectionAlignment alignment) override;
     void setSelectedElementsOpacity(qreal opacity) override;
@@ -815,10 +785,6 @@ ScreenshotController::Impl::Impl(ScreenshotController& controller,
                 } else if (key == QStringLiteral("text_recognition/hardware_acceleration") &&
                            m_ocrRecognition != nullptr) {
                     m_ocrRecognition->setHardwareAcceleration(value.toBool());
-                } else if (key == QStringLiteral("network/proxy")) {
-                    if (m_ocrRecognition != nullptr) {
-                        m_ocrRecognition->setProxyUrl(resolvedOcrProxyUrl(value.toString()));
-                    }
                 }
             });
     }
@@ -1288,14 +1254,13 @@ bool ScreenshotController::Impl::ensureRecognitionFeature() {
         ocrOptions.cacheRoot = QDir(applicationStorage.configurationDirectory())
                                    .filePath(QStringLiteral("assets/ocr"));
     }
-    if (applicationStorage.isInitialized()) {
-        ocrOptions.proxyUrl = resolvedOcrProxyUrl(
-            applicationStorage.configuration().value(QStringLiteral("network/proxy")).toString());
-    }
     if (m_ocrRecognition == nullptr) {
         m_ownedOcrRecognition =
             std::make_unique<ScreenshotOcrRecognitionService>(ocrOptions, &owner);
         m_ocrRecognition = m_ownedOcrRecognition.get();
+        if (applicationStorage.isInitialized())
+            snow_shot::presentation::bindOcrProxyConfiguration(*m_ocrRecognition,
+                                                               applicationStorage.configuration());
     }
 #if SNOW_SHOT_ENABLE_QR_RECOGNITION
     if (!m_qrRecognition)
@@ -1634,61 +1599,67 @@ void ScreenshotController::Impl::createSelectorWorkflow() {
 }
 
 void ScreenshotController::Impl::createToolCommandWorkflow() {
-    m_toolCommandWorkflow = std::make_unique<
-        ScreenshotToolCommandWorkflow>(ScreenshotToolCommandWorkflowContext{
-        m_captureState,
-        ScreenshotToolCommandActions{
-            [this]() { return m_selectorCoordinator->ready(); },
-            [this]() { m_selectorWorkflow->startRefresh(); },
-            [this](const QPoint& physicalPoint) {
-                static_cast<void>(m_selectorWorkflow->updateSelectionAt(physicalPoint));
+    m_toolCommandWorkflow =
+        std::make_unique<ScreenshotToolCommandWorkflow>(ScreenshotToolCommandWorkflowContext{
+            m_captureState,
+            ScreenshotToolCommandActions{
+                [this]() { return m_selectorCoordinator->ready(); },
+                [this]() { m_selectorWorkflow->startRefresh(); },
+                [this](const QPoint& physicalPoint) {
+                    static_cast<void>(m_selectorWorkflow->updateSelectionAt(physicalPoint));
+                },
+                [this]() { m_selectorWorkflow->clearSelection(); },
+                [this](bool enabled) {
+                    m_overlayCoordinator->setCanvasInteractionEnabled(m_displaySession, enabled);
+                },
+                [this](SnowCanvasTool tool) {
+                    m_overlayCoordinator->setCanvasTool(m_displaySession, tool);
+                },
+                [this](SnowCanvasShapeStyle* outStyle) {
+                    return m_overlayCoordinator->tryCurrentRectangleStyle(m_displaySession,
+                                                                          outStyle);
+                },
+                [this](const SnowCanvasShapeStyle& style, quint32 properties,
+                       SnowCanvasShapeKind kind) {
+                    m_overlayCoordinator->setShapeStylePatch(m_displaySession, style, properties,
+                                                             kind);
+                },
+                [this](const SnowCanvasFilterStyle& style, quint32 properties) {
+                    m_overlayCoordinator->setFilterStyle(m_displaySession, style, properties);
+                },
+                [this](const SnowCanvasWatermarkConfig& config) {
+                    m_overlayCoordinator->setWatermarkConfig(m_displaySession, config);
+                },
+                [this](const SnowCanvasSpotlightConfig& config) {
+                    m_overlayCoordinator->setSpotlightConfig(m_displaySession, config);
+                },
+                [this](const SnowCanvasTextStyle& style, quint32 properties) {
+                    m_overlayCoordinator->setTextStyle(m_displaySession, style, properties);
+                },
+                [this](const SnowCanvasSerialNumberStyle& style,
+                       std::optional<quint32> properties) {
+                    m_overlayCoordinator->setSequenceNumberStyle(m_displaySession, style,
+                                                                 properties);
+                },
+                [this](qint64 delta) {
+                    m_overlayCoordinator->adjustSelectedSequenceNumbers(m_displaySession, delta);
+                },
+                [this]() {
+                    m_overlayCoordinator->createTextForSelectedSequenceNumber(m_displaySession);
+                },
+                [this](int direction) {
+                    return m_overlayCoordinator->stepToolbarStrokeWidth(direction);
+                },
+                [this]() { m_presentationServices->updateOverlayState(); },
+                [this]() { m_presentationServices->updateOverlayCursors(); },
+                [this]() { m_presentationServices->raiseToolbarForCanvasInteraction(); },
             },
-            [this]() { m_selectorWorkflow->clearSelection(); },
-            [this](bool enabled) {
-                m_overlayCoordinator->setCanvasInteractionEnabled(m_displaySession, enabled);
-            },
-            [this](SnowCanvasTool tool) {
-                m_overlayCoordinator->setCanvasTool(m_displaySession, tool);
-            },
-            [this](SnowCanvasShapeStyle* outStyle) {
-                return m_overlayCoordinator->tryCurrentRectangleStyle(m_displaySession, outStyle);
-            },
-            [this](const SnowCanvasShapeStyle& style, quint32 properties,
-                   SnowCanvasShapeKind kind) {
-                m_overlayCoordinator->setShapeStylePatch(m_displaySession, style, properties, kind);
-            },
-            [this](const SnowCanvasFilterStyle& style, quint32 properties) {
-                m_overlayCoordinator->setFilterStyle(m_displaySession, style, properties);
-            },
-            [this](const SnowCanvasWatermarkConfig& config) {
-                m_overlayCoordinator->setWatermarkConfig(m_displaySession, config);
-            },
-            [this](const SnowCanvasSpotlightConfig& config) {
-                m_overlayCoordinator->setSpotlightConfig(m_displaySession, config);
-            },
-            [this](const SnowCanvasTextStyle& style, quint32 properties) {
-                m_overlayCoordinator->setTextStyle(m_displaySession, style, properties);
-            },
-            [this](const SnowCanvasSerialNumberStyle& style, std::optional<quint32> properties) {
-                m_overlayCoordinator->setSerialNumberStyle(m_displaySession, style, properties);
-            },
-            [this](qint64 delta) {
-                m_overlayCoordinator->adjustSelectedSerialNumbers(m_displaySession, delta);
-            },
-            [this]() { m_overlayCoordinator->createTextForSelectedSerialNumber(m_displaySession); },
-            [this](int direction) {
-                return m_overlayCoordinator->stepToolbarStrokeWidth(direction);
-            },
-            [this]() { m_presentationServices->updateOverlayState(); },
-            [this]() { m_presentationServices->updateOverlayCursors(); },
-            [this]() { m_presentationServices->raiseToolbarForCanvasInteraction(); },
-        },
-        m_displaySession,
-        m_geometry,
-        m_interaction,
-        m_selection,
-        m_intelligentSelection,
-    });
+            m_displaySession,
+            m_geometry,
+            m_interaction,
+            m_selection,
+            m_intelligentSelection,
+        });
 }
 
 void ScreenshotController::Impl::createCaptureRuntimeAdapter() {
@@ -1906,14 +1877,7 @@ void ScreenshotController::Impl::handleCapturePresented() {
         m_selection.setRegionType(ScreenshotRegionType::Rectangle);
         m_selection.setSelectionRect(rect);
         m_selection.clearAspectRatioPresetForReplacement();
-        m_interaction.confirmSelection();
-        m_captureState.sessionState = ScreenshotSessionState::Editing;
-        if (m_mcpOptions.value(QStringLiteral("presentation")).toString() !=
-            QStringLiteral("silent")) {
-            m_presentationServices->updateOverlayState();
-            m_presentationServices->showToolbar();
-            m_presentationServices->showSelectionToolbar();
-        }
+        m_overlayInputHandler->confirmSelection();
         emit owner.mcpCapturePresented();
     }
 
@@ -1998,7 +1962,9 @@ void ScreenshotController::Impl::createOverlayInputPipeline() {
         [this](int delta) { return m_overlayCoordinator->stepToolbarSelectionOpacity(delta); },
         [this](int delta) { return m_overlayCoordinator->stepToolbarSpotlightOpacity(delta); },
         [this](int delta) { return m_overlayCoordinator->stepToolbarFilterIntensity(delta); },
-        [this](int delta) { return m_overlayCoordinator->stepToolbarPenFilterStrokeWidth(delta); },
+        [this](int delta) {
+            return m_overlayCoordinator->stepToolbarBrushFilterStrokeWidth(delta);
+        },
         [this](int delta) { return m_overlayCoordinator->stepToolbarWatermarkFontSize(delta); },
         [this]() { copySelectionToClipboard(); },
         [this]() {
@@ -2577,7 +2543,7 @@ void ScreenshotController::Impl::connectSelectorSignals() {
                                  QCoreApplication::translate(
                                      "ScreenshotController",
                                      "Smart selection is using window mode. Enable Accessibility "
-                                     "access in Screenshot settings to select window elements"));
+                                     "access in screenshot settings to select window elements"));
                      });
     QObject::connect(m_selectorCoordinator, &ScreenshotSelectorCoordinator::refreshFinished, &owner,
                      [this](bool ok) {
@@ -2641,14 +2607,14 @@ bool ScreenshotController::Impl::activateTool(ScreenshotActiveTool tool,
     case ScreenshotActiveTool::Bracket:
         setBracketTool();
         break;
-    case ScreenshotActiveTool::FreeDraw:
-        setFreeDrawTool();
+    case ScreenshotActiveTool::Brush:
+        setBrushTool();
         break;
     case ScreenshotActiveTool::RectangleHighlight:
         setHighlightTool();
         break;
-    case ScreenshotActiveTool::PenHighlight:
-        setPenHighlightTool();
+    case ScreenshotActiveTool::BrushHighlight:
+        setBrushHighlightTool();
         break;
     case ScreenshotActiveTool::Eraser:
         setEraserTool();
@@ -2665,8 +2631,8 @@ bool ScreenshotController::Impl::activateTool(ScreenshotActiveTool tool,
     case ScreenshotActiveTool::RectangleFilter:
         setRectangleFilterTool();
         break;
-    case ScreenshotActiveTool::PenFilter:
-        setPenFilterTool();
+    case ScreenshotActiveTool::BrushFilter:
+        setBrushFilterTool();
         break;
     case ScreenshotActiveTool::Watermark:
         setWatermarkTool();
@@ -2674,8 +2640,8 @@ bool ScreenshotController::Impl::activateTool(ScreenshotActiveTool tool,
     case ScreenshotActiveTool::Text:
         setTextTool();
         break;
-    case ScreenshotActiveTool::SerialNumber:
-        setSerialNumberTool();
+    case ScreenshotActiveTool::SequenceNumber:
+        setSequenceNumberTool();
         break;
     case ScreenshotActiveTool::Magnifier:
         setMagnifierTool();
@@ -2690,6 +2656,12 @@ bool ScreenshotController::Impl::activateTool(ScreenshotActiveTool tool,
     case ScreenshotActiveTool::Latex:
     case ScreenshotActiveTool::Markdown:
     case ScreenshotActiveTool::Html: {
+        if (reason != ScreenshotToolActivationReason::Command) {
+            // Resize and reselection restore through the confirmation fast path,
+            // before the committed region is presented with an intermediate tool.
+            activateRecognitionToolForSelection(tool);
+            return m_interaction.activeTool() == tool;
+        }
         const quint64 sessionId = m_captureState.sessionId;
         const quint64 selectionRevision = m_interaction.selectionModeRevision();
         const quint64 activationGeneration = m_selectionToolActivationGeneration;
@@ -2803,10 +2775,10 @@ void ScreenshotController::Impl::setTextTool() {
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
-void ScreenshotController::Impl::setSerialNumberTool() {
+void ScreenshotController::Impl::setSequenceNumberTool() {
     deactivateRecognition();
     const bool scrollingCaptureStopped = stopScrollingCapture(true);
-    m_toolCommandWorkflow->setSerialNumberTool();
+    m_toolCommandWorkflow->setSequenceNumberTool();
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
@@ -4741,7 +4713,7 @@ void ScreenshotController::Impl::printSelection() {
                 {{QStringLiteral("request_kind"), QStringLiteral("capture")},
                  {QStringLiteral("operation"), QString::number(epoch)},
                  {QStringLiteral("stage"), !snapshotSucceeded ? QStringLiteral("export_image")
-                                           : !printer         ? QStringLiteral("service_destroyed")
+                                           : !printer ? QStringLiteral("service_destroyed")
                                                       : QStringLiteral("service_rejected")}},
                 QtWarningMsg);
             finished({ScreenshotPrintService::Status::Failed,
@@ -5375,9 +5347,10 @@ void ScreenshotController::Impl::copySelectionToClipboardWithSource(
         if (m_ocrController->copyRecognitionToClipboard()) {
             return;
         }
-        m_messages->error(QString::fromLatin1(kCopyMessageKey),
-                          QCoreApplication::translate("ScreenshotController",
-                                                      "No recognized result is available to copy"));
+        m_messages->error(
+            QString::fromLatin1(kCopyMessageKey),
+            QCoreApplication::translate("ScreenshotController",
+                                        "No recognition result is available to copy"));
         return;
     }
     const snow_shot::storage::ScreenshotSettings settings;
@@ -5771,10 +5744,10 @@ void ScreenshotController::Impl::setLineTool() {
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
-void ScreenshotController::Impl::setFreeDrawTool() {
+void ScreenshotController::Impl::setBrushTool() {
     deactivateRecognition();
     const bool scrollingCaptureStopped = stopScrollingCapture(true);
-    m_toolCommandWorkflow->setFreeDrawTool();
+    m_toolCommandWorkflow->setBrushTool();
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
@@ -5785,10 +5758,10 @@ void ScreenshotController::Impl::setHighlightTool() {
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
-void ScreenshotController::Impl::setPenHighlightTool() {
+void ScreenshotController::Impl::setBrushHighlightTool() {
     deactivateRecognition();
     const bool scrollingCaptureStopped = stopScrollingCapture(true);
-    m_toolCommandWorkflow->setPenHighlightTool();
+    m_toolCommandWorkflow->setBrushHighlightTool();
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
@@ -5838,10 +5811,10 @@ void ScreenshotController::Impl::setRectangleFilterTool() {
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
-void ScreenshotController::Impl::setPenFilterTool() {
+void ScreenshotController::Impl::setBrushFilterTool() {
     deactivateRecognition();
     const bool scrollingCaptureStopped = stopScrollingCapture(true);
-    m_toolCommandWorkflow->setPenFilterTool();
+    m_toolCommandWorkflow->setBrushFilterTool();
     restoreToolUiAfterScrollingCapture(scrollingCaptureStopped);
 }
 
@@ -5882,26 +5855,26 @@ void ScreenshotController::Impl::setTextStyleFromToolbar(const SnowCanvasTextSty
     m_toolCommandWorkflow->setTextStyleFromToolbar(style, properties);
 }
 
-void ScreenshotController::Impl::setSerialNumberStyleFromToolbar(
+void ScreenshotController::Impl::setSequenceNumberStyleFromToolbar(
     const SnowCanvasSerialNumberStyle& style) {
-    m_toolCommandWorkflow->setSerialNumberStyleFromToolbar(style);
+    m_toolCommandWorkflow->setSequenceNumberStyleFromToolbar(style);
 }
 
-void ScreenshotController::Impl::setSerialNumberStyleFromToolbar(
+void ScreenshotController::Impl::setSequenceNumberStyleFromToolbar(
     const SnowCanvasSerialNumberStyle& style, quint32 properties) {
-    m_toolCommandWorkflow->setSerialNumberStyleFromToolbar(style, properties);
+    m_toolCommandWorkflow->setSequenceNumberStyleFromToolbar(style, properties);
 }
 
-void ScreenshotController::Impl::decrementSelectedSerialNumbers() {
-    m_toolCommandWorkflow->decrementSelectedSerialNumbers();
+void ScreenshotController::Impl::decrementSelectedSequenceNumbers() {
+    m_toolCommandWorkflow->decrementSelectedSequenceNumbers();
 }
 
-void ScreenshotController::Impl::incrementSelectedSerialNumbers() {
-    m_toolCommandWorkflow->incrementSelectedSerialNumbers();
+void ScreenshotController::Impl::incrementSelectedSequenceNumbers() {
+    m_toolCommandWorkflow->incrementSelectedSequenceNumbers();
 }
 
-void ScreenshotController::Impl::createTextForSelectedSerialNumber() {
-    m_toolCommandWorkflow->createTextForSelectedSerialNumber();
+void ScreenshotController::Impl::createTextForSelectedSequenceNumber() {
+    m_toolCommandWorkflow->createTextForSelectedSequenceNumber();
 }
 
 void ScreenshotController::Impl::repositionToolbarForContentChange() {
@@ -6292,11 +6265,6 @@ bool ScreenshotController::Impl::selectPreviousSelection(bool previous) {
     return true;
 }
 
-bool ScreenshotController::Impl::finalizeSelectionAspectRatio() {
-    return m_selection.finalizeAspectRatio(
-        m_geometry.canvasBounds(), snow_shot::presentation::kScreenshotSelectionMinimumSize);
-}
-
 void ScreenshotController::Impl::synchronizeQrToolbar() {
 #if SNOW_SHOT_ENABLE_QR_RECOGNITION
     auto* toolbar = m_overlayCoordinator ? m_overlayCoordinator->toolbar() : nullptr;
@@ -6399,75 +6367,74 @@ void ScreenshotController::Impl::scheduleAutomaticQrRecognition() {
 }
 
 void ScreenshotController::Impl::handleSelectionConfirmed() {
-    if (finalizeSelectionAspectRatio() && m_presentationServices != nullptr) {
-        m_presentationServices->updateOverlayState();
-    }
     scheduleAutomaticQrRecognition();
 
     const PendingSelectionAction action =
         std::exchange(m_pendingSelectionAction, PendingSelectionAction::None);
+    auto* toolbar = m_captureWorkflow->suppressCaptureToolbar()
+                        ? m_overlayCoordinator->toolbar()
+                        : m_overlayCoordinator->ensureToolbar();
     if (action == PendingSelectionAction::None) {
+        if (toolbar != nullptr && !m_captureWorkflow->suppressCaptureToolbar())
+            toolbar->restoreRememberedDrawingTool();
         return;
     }
 
-    const quint64 sessionId = m_captureState.sessionId;
-    QTimer::singleShot(0, &owner, [this, action, sessionId]() mutable {
-        if (m_captureState.sessionId != sessionId ||
-            m_captureState.sessionState != ScreenshotSessionState::Editing) {
-            return;
-        }
-        switch (action) {
-        case PendingSelectionAction::Pin:
-            pinSelectionToScreen();
-            break;
-        case PendingSelectionAction::RecognizeText:
-        case PendingSelectionAction::RecognizeTextAndCopy: {
-            const QScopedValueRollback<bool> copyGuard(
-                m_activatingOcrCopy, action == PendingSelectionAction::RecognizeTextAndCopy);
-            m_activatingQuickOcr = m_pendingOcrFromQuickOcrAction;
-            m_pendingOcrFromQuickOcrAction = false;
-            setOcrTool();
-            m_activatingQuickOcr = false;
-            break;
-        }
-        case PendingSelectionAction::RecognizeTextTranslation:
-            m_pendingOcrFromQuickOcrAction = false;
-            setTextTranslationTool();
-            break;
-        case PendingSelectionAction::Copy:
-            copySelectionToClipboard();
-            break;
-        case PendingSelectionAction::QuickSave:
-            quickSaveSelection();
-            break;
-        case PendingSelectionAction::Save:
-            saveSelectionToFile();
-            break;
-        case PendingSelectionAction::StartVideo:
-            startScreenRecording();
-            break;
-        case PendingSelectionAction::StartScrolling:
-            startScrollingScreenshot();
-            break;
-        case PendingSelectionAction::RecognizeTable:
-            setTableTool();
-            break;
-        case PendingSelectionAction::RecognizeQr:
-            setQrTool();
-            break;
-        case PendingSelectionAction::RecognizeFormula:
-            setLatexTool();
-            break;
-        case PendingSelectionAction::ConvertMarkdown:
-            setMarkdownTool();
-            break;
-        case PendingSelectionAction::ConvertHtml:
-            setHtmlTool();
-            break;
-        case PendingSelectionAction::None:
-            break;
-        }
-    });
+    if (toolbar != nullptr)
+        toolbar->suppressRememberedDrawingTool();
+    // The input handler has committed the region and guards session lifetime
+    // around this callback. Dispatch before it presents any editing UI.
+    switch (action) {
+    case PendingSelectionAction::Pin:
+        pinSelectionToScreen();
+        break;
+    case PendingSelectionAction::RecognizeText:
+    case PendingSelectionAction::RecognizeTextAndCopy: {
+        const QScopedValueRollback<bool> copyGuard(
+            m_activatingOcrCopy, action == PendingSelectionAction::RecognizeTextAndCopy);
+        m_activatingQuickOcr = m_pendingOcrFromQuickOcrAction;
+        m_pendingOcrFromQuickOcrAction = false;
+        setOcrTool();
+        m_activatingQuickOcr = false;
+        break;
+    }
+    case PendingSelectionAction::RecognizeTextTranslation:
+        m_pendingOcrFromQuickOcrAction = false;
+        setTextTranslationTool();
+        break;
+    case PendingSelectionAction::Copy:
+        copySelectionToClipboard();
+        break;
+    case PendingSelectionAction::QuickSave:
+        quickSaveSelection();
+        break;
+    case PendingSelectionAction::Save:
+        saveSelectionToFile();
+        break;
+    case PendingSelectionAction::StartVideo:
+        startScreenRecording();
+        break;
+    case PendingSelectionAction::StartScrolling:
+        startScrollingScreenshot();
+        break;
+    case PendingSelectionAction::RecognizeTable:
+        setTableTool();
+        break;
+    case PendingSelectionAction::RecognizeQr:
+        setQrTool();
+        break;
+    case PendingSelectionAction::RecognizeFormula:
+        setLatexTool();
+        break;
+    case PendingSelectionAction::ConvertMarkdown:
+        setMarkdownTool();
+        break;
+    case PendingSelectionAction::ConvertHtml:
+        setHtmlTool();
+        break;
+    case PendingSelectionAction::None:
+        break;
+    }
 }
 
 void ScreenshotController::Impl::shutdown() {
@@ -6662,7 +6629,7 @@ bool ScreenshotController::beginGlobalMouseCapture(
     case Action::ScreenshotCopy:
         pending = Impl::PendingSelectionAction::Copy;
         break;
-    case Action::ScreenshotFixed:
+    case Action::ScreenshotPinToScreen:
         pending = Impl::PendingSelectionAction::Pin;
         break;
     case Action::ScreenshotOcr:
@@ -7008,6 +6975,18 @@ bool ScreenshotControllerTestAccess::exportActive(const ScreenshotController& co
     return !controller.m_impl->m_activeImageExports.isEmpty();
 }
 
+void ScreenshotControllerTestAccess::confirmCaptureSelection(
+    ScreenshotController& controller, ScreenshotController::CaptureAction action) {
+    auto& state = *controller.m_impl;
+    state.m_overlayCoordinator->resetToolbarForNewCapture();
+    state.m_interaction.enterOverlayVisible(false);
+    state.m_captureState.sessionState = ScreenshotSessionState::OverlayVisible;
+    state.m_pendingSelectionAction = action;
+    state.m_pendingOcrFromQuickOcrAction =
+        action == ScreenshotController::CaptureAction::RecognizeText;
+    state.m_overlayInputHandler->confirmSelection();
+}
+
 ScreenshotOverlayWindow*
 ScreenshotControllerTestAccess::presentSelection(ScreenshotController& controller) {
     auto& state = *controller.m_impl;
@@ -7149,16 +7128,16 @@ const std::pair<const char*, ScreenshotActiveTool> mcpTools[] = {
     {"angle", ScreenshotActiveTool::Angle},
     {"bracket", ScreenshotActiveTool::Bracket},
     {"line", ScreenshotActiveTool::Line},
-    {"freehand", ScreenshotActiveTool::FreeDraw},
+    {"freehand", ScreenshotActiveTool::Brush},
     {"rectangle_highlight", ScreenshotActiveTool::RectangleHighlight},
-    {"pen_highlight", ScreenshotActiveTool::PenHighlight},
+    {"pen_highlight", ScreenshotActiveTool::BrushHighlight},
     {"eraser", ScreenshotActiveTool::Eraser},
     {"rectangle_eraser", ScreenshotActiveTool::RectangleEraser},
     {"brush_eraser", ScreenshotActiveTool::BrushEraser},
     {"rectangle_filter", ScreenshotActiveTool::RectangleFilter},
-    {"pen_filter", ScreenshotActiveTool::PenFilter},
+    {"pen_filter", ScreenshotActiveTool::BrushFilter},
     {"text", ScreenshotActiveTool::Text},
-    {"serial_number", ScreenshotActiveTool::SerialNumber},
+    {"serial_number", ScreenshotActiveTool::SequenceNumber},
     {"watermark", ScreenshotActiveTool::Watermark},
     {"spotlight", ScreenshotActiveTool::Spotlight},
     {"magnifier", ScreenshotActiveTool::Magnifier},

@@ -13,6 +13,10 @@
     }
   ],
   "features": {
+    "main8": {
+      "description": "Build the 8-bit public API; disable dynamic bit-depth loading unless Main10 is also requested",
+      "supports": "windows & !uwp & (x64 | arm64)"
+    },
     "main10": {
       "description": "Link both 8-bit and Main10 encoder implementations into one library",
       "supports": "x64 | arm64"

@@ -61,6 +61,73 @@ QString contextMenuAccessKey(const QJsonValue& value) {
 }
 #endif
 
+// Poll only readiness on the GUI thread. Waiting in a pool worker would make shutdown wait
+// for the same unbounded native call that we moved out of the GUI event loop.
+template <typename Result, typename Completion>
+void observeCompletion(QObject* context, std::shared_future<Result> future, Completion completion) {
+    auto* timer = new QTimer(context);
+    timer->setInterval(16);
+    const auto check = [timer, future = std::move(future), completion = std::move(completion)] {
+        if (!timer->isActive() ||
+            future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+            return;
+        timer->stop();
+        timer->deleteLater();
+        completion(future.get());
+    };
+    QObject::connect(timer, &QTimer::timeout, timer, check);
+    timer->start();
+    QMetaObject::invokeMethod(timer, check, Qt::QueuedConnection);
+}
+
+std::shared_future<storage::StorageResult>
+importCompletion(QObject* context, bool accepted,
+                 std::shared_future<platform::macos::LoginItemResult> login,
+                 std::shared_future<storage::StorageResult> history) {
+    if (!login.valid() && !history.valid())
+        return {};
+    struct State {
+        std::promise<storage::StorageResult> promise;
+        int remaining = 0;
+        bool finished = false;
+        storage::StorageResult result = storage::StorageResult::ok();
+        void complete(const storage::StorageResult& part) {
+            if (finished)
+                return;
+            if (!part.success)
+                result = part;
+            if (--remaining == 0) {
+                finished = true;
+                promise.set_value(result);
+            }
+        }
+    };
+    auto state = std::make_shared<State>();
+    state->remaining = int(login.valid()) + int(history.valid());
+    if (!accepted)
+        state->result = storage::StorageResult::failure({});
+    const auto future = state->promise.get_future().share();
+    const auto lifetime = QObject::connect(context, &QObject::destroyed, [state] {
+        if (!state->finished) {
+            state->finished = true;
+            state->promise.set_value(storage::StorageResult::failure({}));
+        }
+    });
+    const auto complete = [state, lifetime](const storage::StorageResult& result) {
+        state->complete(result);
+        if (state->finished)
+            QObject::disconnect(lifetime);
+    };
+    if (login.valid())
+        observeCompletion(context, std::move(login),
+                          [complete](const platform::macos::LoginItemResult& result) {
+                              complete({result.success, result.error});
+                          });
+    if (history.valid())
+        observeCompletion(context, std::move(history), complete);
+    return future;
+}
+
 std::optional<SkinSurface> skinSurfaceForFilePath(SettingsFilePathBinding binding) {
     switch (binding) {
     case SettingsFilePathBinding::SkinPath:
@@ -142,7 +209,7 @@ QString globalMouseKey(SettingsGlobalMouseAction action) {
     switch (action) {
     case SettingsGlobalMouseAction::ScreenshotCopy:
         return QStringLiteral("global_mouse/screenshot_copy");
-    case SettingsGlobalMouseAction::ScreenshotFixed:
+    case SettingsGlobalMouseAction::ScreenshotPinToScreen:
         return QStringLiteral("global_mouse/screenshot_fixed");
     case SettingsGlobalMouseAction::ScreenshotOcr:
         return QStringLiteral("global_mouse/screenshot_ocr");
@@ -223,18 +290,20 @@ storage::CaptureHistoryPolicy defaultHistoryPolicy() {
 
 platform::windows::AdministratorResult
 applyNativeStartupSettings(bool enabled, bool elevated,
-                           platform::macos::LoginItemService* loginItems) {
+                           platform::macos::LoginItemService* loginItems,
+                           platform::macos::LoginItemService::Completion completion) {
     if (app::distribution::isStoreManaged())
         elevated = false;
 #ifdef Q_OS_MACOS
     Q_UNUSED(elevated);
-    const auto result = loginItems->setEnabled(enabled);
+    const auto result = loginItems->setEnabled(enabled, std::move(completion));
     platform::windows::AdministratorResult converted;
     converted.success = result.success;
     converted.error = result.error;
     return converted;
 #else
     Q_UNUSED(loginItems);
+    Q_UNUSED(completion);
     using namespace platform::windows;
     auto& configuration = storage::ApplicationStorage::instance().configuration();
     const bool oldEnabled = storage::SystemSettings().autoStartAtBoot();
@@ -365,12 +434,20 @@ bool BuiltInSettingsBackend::eventFilter(QObject* watched, QEvent* event) {
     return SettingsBackend::eventFilter(watched, event);
 }
 
-platform::windows::AdministratorResult BuiltInSettingsBackend::applyStartupSettings(bool enabled,
-                                                                                    bool elevated) {
+platform::windows::AdministratorResult
+BuiltInSettingsBackend::applyStartupSettings(bool enabled, bool elevated, bool reportError) {
     if (app::distribution::isStoreManaged())
         elevated = false;
-    return m_startupSettingsApply ? m_startupSettingsApply(enabled, elevated)
-                                  : applyNativeStartupSettings(enabled, elevated, m_loginItems);
+    platform::macos::LoginItemService::Completion completion;
+    if (reportError)
+        completion = [guard = QPointer<BuiltInSettingsBackend>(this)](
+                         const platform::macos::LoginItemResult& result) {
+            if (guard && !result.success)
+                emit guard->operationMessage(result.error, false);
+        };
+    return m_startupSettingsApply
+               ? m_startupSettingsApply(enabled, elevated)
+               : applyNativeStartupSettings(enabled, elevated, m_loginItems, std::move(completion));
 }
 
 void BuiltInSettingsBackend::connectSkinControllerIfNeeded() {
@@ -1021,7 +1098,7 @@ bool BuiltInSettingsBackend::switchValue(SettingsSwitchBinding binding) const {
         return storage::RecordingSettings().notifyAfterExportCompletes();
     case SettingsSwitchBinding::ScreenRecordingDeleteFilesOnRecordingClose:
         return storage::RecordingSettings().deleteFilesOnRecordingClose();
-    case SettingsSwitchBinding::DisableHotkeysOnFocusedFullscreen:
+    case SettingsSwitchBinding::DisableShortcutsOnFocusedFullscreen:
         return storage::GlobalShortcutSettings().disableOnFocusedFullscreenWindow();
     case SettingsSwitchBinding::McpEnabled:
         return storage::ApplicationStorage::instance()
@@ -1113,6 +1190,24 @@ void BuiltInSettingsBackend::refreshPlatformSettings() {
             qWarning().noquote() << error;
     }
 #endif
+}
+QString BuiltInSettingsBackend::fieldError(const QString& fieldId) const {
+#ifdef Q_OS_MACOS
+    if (fieldId == u"system.auto-start-at-boot")
+        return m_loginItems->error();
+#else
+    Q_UNUSED(fieldId);
+#endif
+    return {};
+}
+bool BuiltInSettingsBackend::fieldUsesStorageErrors(const QString& fieldId) const {
+#ifdef Q_OS_MACOS
+    if (fieldId == u"system.auto-start-at-boot")
+        return false;
+#else
+    Q_UNUSED(fieldId);
+#endif
+    return true;
 }
 bool BuiltInSettingsBackend::fieldPending(const QString& fieldId) const {
 #ifdef Q_OS_MACOS
@@ -1383,7 +1478,7 @@ bool BuiltInSettingsBackend::applySwitchValue(SettingsSwitchBinding binding, boo
     if (binding == SettingsSwitchBinding::ScreenRecordingDeleteFilesOnRecordingClose) {
         return storage::RecordingSettings().setDeleteFilesOnRecordingClose(value);
     }
-    if (binding == SettingsSwitchBinding::DisableHotkeysOnFocusedFullscreen) {
+    if (binding == SettingsSwitchBinding::DisableShortcutsOnFocusedFullscreen) {
         return storage::GlobalShortcutSettings().setDisableOnFocusedFullscreenWindow(value);
     }
     if (binding == SettingsSwitchBinding::McpEnabled) {
@@ -1476,7 +1571,7 @@ bool BuiltInSettingsBackend::applySwitchValue(SettingsSwitchBinding binding, boo
     case SettingsSwitchBinding::ScreenRecordingAutoExitAfterRecordingEnds:
     case SettingsSwitchBinding::ScreenRecordingNotifyAfterExportCompletes:
     case SettingsSwitchBinding::ScreenRecordingDeleteFilesOnRecordingClose:
-    case SettingsSwitchBinding::DisableHotkeysOnFocusedFullscreen:
+    case SettingsSwitchBinding::DisableShortcutsOnFocusedFullscreen:
     case SettingsSwitchBinding::McpEnabled:
     case SettingsSwitchBinding::AutoStartAtBoot:
     case SettingsSwitchBinding::LaunchAsAdministrator:
@@ -1916,6 +2011,8 @@ bool BuiltInSettingsBackend::applyDirectoryPathValue(SettingsDirectoryPathBindin
 
 QString BuiltInSettingsBackend::textValue(SettingsTextBinding binding) const {
     switch (binding) {
+    case SettingsTextBinding::HttpProxy:
+        return storage::NetworkSettings().httpProxy();
     case SettingsTextBinding::ServerUrl:
 #if SNOW_SHOT_ENABLE_API_CONFIGURATION
         return storage::ApiConfigurationSettings().serverUrl();
@@ -1934,6 +2031,8 @@ QString BuiltInSettingsBackend::textValue(SettingsTextBinding binding) const {
 
 bool BuiltInSettingsBackend::applyTextValue(SettingsTextBinding binding, const QString& value) {
     switch (binding) {
+    case SettingsTextBinding::HttpProxy:
+        return storage::NetworkSettings().setHttpProxy(value);
     case SettingsTextBinding::ServerUrl:
 #if SNOW_SHOT_ENABLE_API_CONFIGURATION
         return storage::ApiConfigurationSettings().setServerUrl(value);
@@ -2356,17 +2455,25 @@ bool BuiltInSettingsBackend::triggerAction(SettingsActionBinding binding, const 
         const auto current = applicationStorage.configuration().snapshot();
         read.preserveOmittedDirectories(current);
         read.preserveOmittedCredentials(current);
-        if (!importConfigurationSnapshot(read.values, read.schemaVersion)) {
-            finish(false, QCoreApplication::translate("SettingsBackend",
-                                                      "The configuration could not be imported"));
-            return true;
-        }
-        const storage::StorageResult flushed = applicationStorage.flushNow();
-        if (!flushed.success) {
-            finish(false, flushed.error);
-            return true;
-        }
-        finish(true, {});
+        std::shared_future<storage::StorageResult> completion;
+        const bool accepted =
+            importConfigurationSnapshot(read.values, read.schemaVersion, &completion);
+        const auto complete = [finish, accepted](const storage::StorageResult& result) {
+            if (!accepted || !result.success) {
+                finish(false,
+                       result.error.isEmpty()
+                           ? QCoreApplication::translate("SettingsBackend",
+                                                         "The configuration could not be imported")
+                           : result.error);
+                return;
+            }
+            const auto flushed = storage::ApplicationStorage::instance().flushNow();
+            finish(flushed.success, flushed.error);
+        };
+        if (completion.valid())
+            observeCompletion(this, std::move(completion), complete);
+        else
+            complete(storage::StorageResult::ok());
         return true;
     }
     }
@@ -2439,6 +2546,8 @@ bool BuiltInSettingsBackend::importConfigurationSnapshot(
     if (!configuration.applySnapshot(staged, schemaVersion))
         return false;
     bool accepted = true;
+    std::shared_future<platform::macos::LoginItemResult> loginCompletion;
+    std::shared_future<storage::StorageResult> historyCompletion;
     const auto applyRuntimeValue = [&](const QString& key, const auto& apply) {
         const auto current = configuration.value(key);
         if (previous.value(key) == current)
@@ -2475,8 +2584,12 @@ bool BuiltInSettingsBackend::importConfigurationSnapshot(
         (previous.value(enabledKey) != requestedEnabled ||
          previous.value(elevatedKey) != requestedElevated)) {
         const auto result =
-            applyStartupSettings(requestedEnabled.toBool(), requestedElevated.toBool());
+            applyStartupSettings(requestedEnabled.toBool(), requestedElevated.toBool(), false);
         accepted = accepted && result.success;
+#ifdef Q_OS_MACOS
+        if (result.success && !m_startupSettingsApply)
+            loginCompletion = m_loginItems->completionFuture();
+#endif
     }
 #ifdef Q_OS_WIN
     if (previous.value(contextMenuKey) != requestedContextMenu ||
@@ -2490,15 +2603,17 @@ bool BuiltInSettingsBackend::importConfigurationSnapshot(
             configuration.value(it.key()) != it.value())
             historyChanged = true;
     if (historyChanged) {
-        const auto future =
+        historyCompletion =
             storage.requestCaptureHistoryPolicyAsync(storage.captureHistoryPolicy());
-        if (completion)
-            *completion = future;
-        accepted = future.valid() &&
-                   (future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready ||
-                    future.get().success) &&
+        accepted = historyCompletion.valid() &&
+                   (historyCompletion.wait_for(std::chrono::milliseconds(0)) !=
+                        std::future_status::ready ||
+                    historyCompletion.get().success) &&
                    accepted;
     }
+    if (completion)
+        *completion = importCompletion(this, accepted, std::move(loginCompletion),
+                                       std::move(historyCompletion));
     emit synchronized();
     return accepted;
 }
@@ -2603,7 +2718,7 @@ SettingsResetResult BuiltInSettingsBackend::resetSectionWithResults(SettingsSect
                       QStringLiteral("global_shortcuts/screenshot"));
         resetShortcut(GlobalShortcutAction::ScreenshotDelay,
                       QStringLiteral("global_shortcuts/screenshot_delay"));
-        resetShortcut(GlobalShortcutAction::ScreenshotFixed,
+        resetShortcut(GlobalShortcutAction::ScreenshotPinToScreen,
                       QStringLiteral("global_shortcuts/screenshot_fixed"));
         resetShortcut(GlobalShortcutAction::ScreenshotOcr,
                       QStringLiteral("global_shortcuts/screenshot_ocr"));
@@ -2611,6 +2726,8 @@ SettingsResetResult BuiltInSettingsBackend::resetSectionWithResults(SettingsSect
                       QStringLiteral("global_shortcuts/screenshot_ocr_copy"));
         resetShortcut(GlobalShortcutAction::ScreenshotTranslation,
                       QStringLiteral("global_shortcuts/screenshot_translation"));
+        resetShortcut(GlobalShortcutAction::ScreenshotScrolling,
+                      QStringLiteral("global_shortcuts/screenshot_scrolling"));
         resetShortcut(GlobalShortcutAction::ScreenshotCopy,
                       QStringLiteral("global_shortcuts/screenshot_copy"));
         resetShortcut(GlobalShortcutAction::ScreenshotSave,
@@ -2630,14 +2747,14 @@ SettingsResetResult BuiltInSettingsBackend::resetSectionWithResults(SettingsSect
     }
     case SettingsSectionReset::GlobalMouse: {
         QMap<QString, QJsonValue> values;
-        for (const auto action :
-             {SettingsGlobalMouseAction::ScreenshotCopy, SettingsGlobalMouseAction::ScreenshotFixed,
-              SettingsGlobalMouseAction::ScreenshotOcr,
-              SettingsGlobalMouseAction::ScreenshotOcrCopy,
-              SettingsGlobalMouseAction::ScreenshotTranslation,
-              SettingsGlobalMouseAction::ScreenshotSave,
-              SettingsGlobalMouseAction::ScreenshotQuickSave,
-              SettingsGlobalMouseAction::ScreenRecording}) {
+        for (const auto action : {SettingsGlobalMouseAction::ScreenshotCopy,
+                                  SettingsGlobalMouseAction::ScreenshotPinToScreen,
+                                  SettingsGlobalMouseAction::ScreenshotOcr,
+                                  SettingsGlobalMouseAction::ScreenshotOcrCopy,
+                                  SettingsGlobalMouseAction::ScreenshotTranslation,
+                                  SettingsGlobalMouseAction::ScreenshotSave,
+                                  SettingsGlobalMouseAction::ScreenshotQuickSave,
+                                  SettingsGlobalMouseAction::ScreenRecording}) {
             const QString key = globalMouseKey(action);
             if (storage::ConfigurationSchema::contains(key))
                 values.insert(key, storage::ConfigurationSchema::defaultValue(key));
@@ -2663,7 +2780,7 @@ SettingsResetResult BuiltInSettingsBackend::resetSectionWithResults(SettingsSect
                       QStringLiteral("global_shortcuts/translate_selected_text"));
         resetShortcut(GlobalShortcutAction::ToggleWindowUnderCursorAlwaysOnTop,
                       QStringLiteral("global_shortcuts/toggle_window_under_cursor_always_on_top"));
-        resetShortcut(GlobalShortcutAction::ToggleGlobalHotkeys,
+        resetShortcut(GlobalShortcutAction::ToggleGlobalShortcuts,
                       QStringLiteral("global_shortcuts/toggle_global_hotkeys"));
         resetShortcut(
             GlobalShortcutAction::ToggleDisableOnFocusedFullscreenWindow,
@@ -3074,7 +3191,7 @@ SettingsResetResult BuiltInSettingsBackend::resetSectionWithResults(SettingsSect
              storage::ConfigurationSchema::defaultValue(
                  QStringLiteral("screen_recording/capture_toolbar_in_recording"))},
         });
-    case SettingsSectionReset::GlobalHotkeys:
+    case SettingsSectionReset::GlobalShortcuts:
         return resetAvailableConfigurationValues(sectionDefaults(reset));
     case SettingsSectionReset::SystemGeneral: {
         const auto& configuration = storage::ApplicationStorage::instance().configuration();
@@ -3103,6 +3220,11 @@ SettingsResetResult BuiltInSettingsBackend::resetSectionWithResults(SettingsSect
             false);
         resetResult.fields.insert(QStringLiteral("system.auto-start-at-boot"),
                                   {result.success, result.error});
+#ifdef Q_OS_MACOS
+        if (result.success && m_loginItems->pending())
+            resetResult.fields[QStringLiteral("system.auto-start-at-boot")].pendingValue =
+                configuration.defaultValue(QStringLiteral("system/auto_start_at_boot")).toBool();
+#endif
 #ifdef Q_OS_WIN
         resetResult.fields.insert(QStringLiteral("system.launch-as-administrator"),
                                   {result.success, result.error});
@@ -3143,9 +3265,12 @@ SettingsResetResult BuiltInSettingsBackend::resetSectionWithResults(SettingsSect
                  QStringLiteral("screenshot/capture_ui_in_scrolling_screenshot"))},
         });
     case SettingsSectionReset::Network:
-        return applySelectValue(
-            SettingsSelectBinding::Proxy,
-            storage::ConfigurationSchema::defaultValue(QStringLiteral("network/proxy")));
+        return storage::ApplicationStorage::instance().configuration().setValues({
+            {QStringLiteral("network/proxy"),
+             storage::ConfigurationSchema::defaultValue(QStringLiteral("network/proxy"))},
+            {QStringLiteral("network/http_proxy"),
+             storage::ConfigurationSchema::defaultValue(QStringLiteral("network/http_proxy"))},
+        });
     case SettingsSectionReset::SystemSettings: {
 #ifdef Q_OS_MACOS
         return storage::ApplicationStorage::instance().configuration().setValues({

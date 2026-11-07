@@ -11,6 +11,7 @@
 #include "widgets/modal.h"
 #include "widgets/message.h"
 #include <QApplication>
+#include <QByteArrayView>
 #include <QFontDatabase>
 #include "snow_shot/storage/settingsadapters.h"
 #include "snow_shot/storage/applicationstorage.h"
@@ -74,6 +75,29 @@ void awaitCondition(const std::function<bool()>& condition, const char* message)
         QThread::msleep(1);
     }
     require(condition(), message);
+}
+QImage readCopiedImage() {
+#if defined(Q_OS_WIN)
+    // Image exports use the native clipboard even with the offscreen QPA plugin.
+    // Its QClipboard is separate, so inspect the published PNG directly on Windows.
+    const UINT pngFormat = RegisterClipboardFormatW(L"PNG");
+    require(pngFormat != 0, "register copied image PNG format");
+    bool opened = false;
+    awaitCondition([&] { return opened || (opened = OpenClipboard(nullptr) != FALSE); },
+                   "open native clipboard to inspect the copied image");
+    const auto close = qScopeGuard([] { CloseClipboard(); });
+    const auto handle = static_cast<HGLOBAL>(GetClipboardData(pngFormat));
+    require(handle != nullptr, "copied image publishes native PNG data");
+    const auto* bytes = static_cast<const char*>(GlobalLock(handle));
+    require(bytes != nullptr, "copied image PNG data can be read");
+    const auto unlock = qScopeGuard([handle] { GlobalUnlock(handle); });
+    const auto image =
+        QImage::fromData(QByteArrayView(bytes, static_cast<qsizetype>(GlobalSize(handle))), "PNG");
+    require(!image.isNull(), "copied image PNG data decodes successfully");
+    return image;
+#else
+    return QApplication::clipboard()->image();
+#endif
 }
 void sendWindowInteraction(snow_shot::presentation::ImageEditingWindow& window, bool active) {
 #if defined(Q_OS_WIN)
@@ -370,6 +394,30 @@ void verifyScrollingSourceImport() {
         require(editor.document()->image() == expected &&
                     editor.document()->bounds() == QRectF(QPointF(), QSizeF(expected.size())),
                 "editor imports exact stitched pixels and trim after scrolling session teardown");
+        require(editor.document()->crop(ImageEditingDocument::CropAxis::Rows, 4, 8),
+                "scrolling screenshot can be edited before copying");
+        const auto edited = editor.document()->image();
+        adqt::widgets::AdButton* copy = nullptr;
+        for (auto* button : editor.palette()->findChildren<adqt::widgets::AdButton*>()) {
+            if (button->property("screenshotToolbarItemId").toString() == QStringLiteral("copy") &&
+                !button->isHidden()) {
+                copy = button;
+                break;
+            }
+        }
+        require(copy && copy->isEnabled(),
+                "copy button stays enabled after asynchronous scrolling import and editing");
+        bool copied = false;
+        QObject::connect(&editor, &ImageEditingWindow::exportFinished, &editor, [&](bool success) {
+            require(success, "edited scrolling screenshot copies successfully");
+            copied = true;
+        });
+        copy->click();
+        awaitCondition([&] { return copied; }, "clicking copy exports the edited scrolling image");
+        require(readCopiedImage().convertToFormat(QImage::Format_RGBA8888) ==
+                        edited.convertToFormat(QImage::Format_RGBA8888) &&
+                    !editor.dirty() && editor.modal()->isOpen(),
+                "copy publishes the full edited image and keeps the editor open");
         editor.shutdown();
     }
 }
@@ -734,10 +782,17 @@ void verifyCropToolHighlight(snow_shot::presentation::ImageEditingWindow& window
             require(window.canvas()->mode() == (selected == rows
                                                     ? ImageEditingCanvas::Mode::CropRows
                                                     : ImageEditingCanvas::Mode::CropColumns),
-                    "crop clicks preserve the selected editing mode");
+                    "the first crop click selects its editing mode");
             requireHighlight(selected);
+            selected->click();
+            require(window.canvas()->mode() == ImageEditingCanvas::Mode::Pan &&
+                        window.palette()->activeTool() == ScreenshotToolPalette::Tool::Move &&
+                        !window.canvas()->interactionEnabled(),
+                    "clicking the active crop tool restores Pan and disables annotation input");
+            requireHighlight(nullptr);
         }
     }
+    rows->click();
     window.palette()->shapeRequested();
     require(window.canvas()->mode() == ImageEditingCanvas::Mode::Draw, "drawing exits crop mode");
     requireHighlight(nullptr);
@@ -749,6 +804,40 @@ void verifyCropToolHighlight(snow_shot::presentation::ImageEditingWindow& window
 void verifyEditingToolbar(snow_shot::presentation::ImageEditingWindow& window) {
     verifyCropToolHighlight(window);
     using Tool = ScreenshotToolPalette::Tool;
+    using Mode = snow_shot::presentation::ImageEditingCanvas::Mode;
+    auto* palette = window.palette();
+    const auto checkpoint = window.document()->checkpoint();
+    for (const auto& [tool, label] :
+         {std::pair{Tool::Select, "Select elements"}, std::pair{Tool::Shape, "Shape"},
+          std::pair{Tool::Move, "Pan"}}) {
+        adqt::widgets::AdButton* button = nullptr;
+        for (auto* candidate : palette->findChildren<adqt::widgets::AdButton*>()) {
+            if (candidate->accessibleName() == QLatin1String(label)) {
+                button = candidate;
+                break;
+            }
+        }
+        require(button, "the editor exposes the tool's toolbar control");
+        for (const bool shortcut : {false, true}) {
+            palette->clearActiveTool();
+            const auto activate = [&] {
+                if (shortcut)
+                    require(palette->activateToolShortcut(tool), "editor tool shortcut activates");
+                else
+                    button->click();
+            };
+            activate();
+            require(palette->activeTool() == tool &&
+                        window.canvas()->mode() == (tool == Tool::Move ? Mode::Pan : Mode::Draw),
+                    "the first activation selects the requested editor mode");
+            activate();
+            require(palette->activeTool() == Tool::Move && window.canvas()->mode() == Mode::Pan &&
+                        !window.canvas()->interactionEnabled(),
+                    "repeating an editor tool returns to Pan and disables annotation interaction");
+        }
+    }
+    require(window.document()->checkpoint() == checkpoint,
+            "returning to Pan preserves the editor document and history");
     auto* screen = QGuiApplication::primaryScreen();
     require(screen && screen->handle(), "editing toolbar fixture has a screen");
     const auto originalBounds = screen->handle()->geometry();
@@ -1636,12 +1725,12 @@ void runImageEditingTests() {
     EditorTranslator translator;
     QApplication::installTranslator(&translator);
     QApplication::processEvents();
-    require(rowButton->accessibleName() == QStringLiteral("[translated] Vertical Crop") &&
+    require(rowButton->accessibleName() == QStringLiteral("[translated] Vertical crop") &&
                 rowButton->toolTip() == rowButton->accessibleName() && rowButton->text().isEmpty(),
             "open editor retranslates at runtime");
     QApplication::removeTranslator(&translator);
     QApplication::processEvents();
-    require(rowButton->accessibleName() == QStringLiteral("Vertical Crop"),
+    require(rowButton->accessibleName() == QStringLiteral("Vertical crop"),
             "runtime language restored");
     rowButton->click();
     const auto map = window.canvas()->canvasToViewTransform();

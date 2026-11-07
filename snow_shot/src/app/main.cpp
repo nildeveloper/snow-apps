@@ -49,6 +49,7 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QPointer>
 #include <QSysInfo>
 #include <optional>
 #include <utility>
@@ -81,6 +82,7 @@ extern "C" void snow_diagnostics_install_panic_hook(void (*callback)(const unsig
 #ifdef SNOW_SHOT_CONTROLLER_LIFETIME_TESTS
 int runScreenshotControllerLifetimeTests(int argc, char** argv);
 int runScreenshotControllerClipboardTests(int argc, char** argv);
+int runOcrProxyStartupTests(int argc, char** argv);
 #endif
 
 namespace {
@@ -188,6 +190,9 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationName(applicationName);
     QCoreApplication::setApplicationVersion(QStringLiteral(SNOW_DIAGNOSTICS_VERSION));
 #ifdef SNOW_SHOT_CONTROLLER_LIFETIME_TESTS
+    if (argc == 2 && QString::fromLocal8Bit(argv[1]) == u"--ocr-proxy-startup-tests") {
+        return runOcrProxyStartupTests(argc, argv);
+    }
     if (argc == 2 && QString::fromLocal8Bit(argv[1]) == u"--controller-lifetime-tests") {
         return runScreenshotControllerLifetimeTests(argc, argv);
     }
@@ -681,9 +686,11 @@ int main(int argc, char* argv[]) {
                                  snow_shot::presentation::styles::ThemeManager::instance()
                                      .updateProgressAppearance());
                          });
-        startupUpdate.setSystemProxy(
-            applicationStorage.configuration().value(QStringLiteral("network/proxy")).toString() ==
-            u"system");
+        startupUpdate.setProxyConfiguration(
+            applicationStorage.configuration().value(QStringLiteral("network/proxy")).toString(),
+            applicationStorage.configuration()
+                .value(QStringLiteral("network/http_proxy"))
+                .toString());
         bool foregroundRequested =
             administratorRestart || launchArguments.contains(QStringLiteral("--show-main-window"));
         const auto initialImageRequest =
@@ -743,31 +750,33 @@ int main(int argc, char* argv[]) {
         }
 #endif
 #ifdef Q_OS_MACOS
-        const auto startupResult =
-            snow_shot::platform::macos::loginItemAutomaticRegistrationAllowed(launchArguments)
-                ? snow_shot::platform::macos::loginItemService().initialize(
-                      startupSettings.autoStartAtBoot())
-                : snow_shot::platform::macos::LoginItemResult{};
+        if (snow_shot::platform::macos::loginItemAutomaticRegistrationAllowed(launchArguments)) {
+            const auto completed = [controller = QPointer<snow_shot::app::ApplicationController>(
+                                        &applicationController)](
+                                       const snow_shot::platform::macos::LoginItemResult& result) {
+                if (result.success || !controller)
+                    return;
+                snow_shot::app::reportStartupRegistrationFailure(result.error);
+                // Startup can otherwise have only a tiny floating toolbar visible.
+                controller->showMainWindow();
+                adqt::widgets::AdMessage::Request request;
+                request.content = result.error;
+                adqt::widgets::AdMessageService::error(std::move(request));
+            };
+            const auto admitted = snow_shot::platform::macos::loginItemService().initialize(
+                startupSettings.autoStartAtBoot(), completed);
+            if (!admitted.success)
+                completed(admitted);
+        }
 #else
         const auto startupResult = snow_shot::platform::windows::reconcileStartupMode(
             !startupSettings.autoStartAtBoot() ? snow_shot::platform::windows::StartupMode::Off
             : startupSettings.launchAsAdministrator()
                 ? snow_shot::platform::windows::StartupMode::ElevatedTask
                 : snow_shot::platform::windows::StartupMode::Registry);
-#endif
-        if (!startupResult.success) {
+        if (!startupResult.success)
             snow_shot::app::reportStartupRegistrationFailure(startupResult.error);
-#ifdef Q_OS_MACOS
-            QTimer::singleShot(0, &app, [&applicationController, error = startupResult.error] {
-                // Startup can otherwise have only a tiny floating toolbar visible.
-                // Give the error a readable application surface before opening it.
-                applicationController.showMainWindow();
-                adqt::widgets::AdMessage::Request request;
-                request.content = error;
-                adqt::widgets::AdMessageService::error(std::move(request));
-            });
 #endif
-        }
     });
     QTimer::singleShot(0, &app, [&] {
         singleInstance.setLaunchRequestHandler(

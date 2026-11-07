@@ -179,7 +179,7 @@ enum class SettingsSwitchBinding {
     ScreenRecordingAutoExitAfterRecordingEnds,
     ScreenRecordingNotifyAfterExportCompletes,
     ScreenRecordingDeleteFilesOnRecordingClose,
-    DisableHotkeysOnFocusedFullscreen,
+    DisableShortcutsOnFocusedFullscreen,
     McpEnabled,
     AutoStartAtBoot,
     LaunchAsAdministrator,
@@ -321,6 +321,7 @@ struct SettingsDirectoryPathDefinition {
 };
 
 enum class SettingsTextBinding {
+    HttpProxy,
     ServerUrl,
     ScreenshotManualFilenameFormat,
     ScreenshotAutoFilenameFormat,
@@ -521,7 +522,7 @@ enum class SettingsSectionReset {
     FloatingToolbar,
     ScreenRecording,
     ScreenRecordingOutput,
-    GlobalHotkeys,
+    GlobalShortcuts,
     SystemGeneral,
     ScreenshotCapture,
     ScreenRecordingCapture,

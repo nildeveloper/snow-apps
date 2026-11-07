@@ -16,8 +16,8 @@
             <translation>Underline</translation>
         </message>
         <message>
-            <source>Wavy Underline</source>
-            <translation>Wavy Underline</translation>
+            <source>Wavy underline</source>
+            <translation>Wavy underline</translation>
         </message>
     </context>
     <context>
@@ -53,10 +53,6 @@
         <message>
             <source>Add</source>
             <translation>Add</translation>
-        </message>
-        <message>
-            <source>Add Template</source>
-            <translation>Add Template</translation>
         </message>
         <message>
             <source>Add screenshot region</source>
@@ -135,8 +131,8 @@
             <translation>Animated recording formats do not contain audio</translation>
         </message>
         <message>
-            <source>Annotation Template</source>
-            <translation>Annotation Template</translation>
+            <source>Annotation template</source>
+            <translation>Annotation template</translation>
         </message>
         <message>
             <source>Arabic numerals</source>
@@ -191,8 +187,8 @@
             <translation>Artist</translation>
         </message>
         <message>
-            <source>Auto Filter</source>
-            <translation>Auto Filter</translation>
+            <source>Auto filter</source>
+            <translation>Auto filter</translation>
         </message>
         <message>
             <source>Auto-scroll</source>
@@ -201,10 +197,6 @@
         <message>
             <source>Auto-scroll interval (scroll to adjust; click to reset to 200 ms)</source>
             <translation>Auto-scroll interval (scroll to adjust; click to reset to 200 ms)</translation>
-        </message>
-        <message>
-            <source>Available for multi-region selections</source>
-            <translation>Available for multi-region selections</translation>
         </message>
         <message>
             <source>Avatar</source>
@@ -251,12 +243,40 @@
             <translation>Bring to front</translation>
         </message>
         <message>
-            <source>Brush Eraser</source>
-            <translation>Brush Eraser</translation>
+            <source>Brush</source>
+            <translation>Brush</translation>
+        </message>
+        <message>
+            <source>Brush eraser</source>
+            <translation>Brush eraser</translation>
         </message>
         <message>
             <source>Brush eraser width %1 (%2px)</source>
             <translation>Brush eraser width %1 (%2px)</translation>
+        </message>
+        <message>
+            <source>Brush filter</source>
+            <translation>Brush filter</translation>
+        </message>
+        <message>
+            <source>Brush filter width %1 (%2px)</source>
+            <translation>Brush filter width %1 (%2px)</translation>
+        </message>
+        <message>
+            <source>Brush highlight</source>
+            <translation>Brush highlight</translation>
+        </message>
+        <message>
+            <source>Brush highlight color</source>
+            <translation>Brush highlight color</translation>
+        </message>
+        <message>
+            <source>Brush highlight color %1</source>
+            <translation>Brush highlight color %1</translation>
+        </message>
+        <message>
+            <source>Brush highlight width %1 (%2px)</source>
+            <translation>Brush highlight width %1 (%2px)</translation>
         </message>
         <message>
             <source>Cancel</source>
@@ -267,8 +287,8 @@
             <translation>Cancel screenshot</translation>
         </message>
         <message>
-            <source>Capture interface during scrolling screenshot</source>
-            <translation>Capture interface during scrolling screenshot</translation>
+            <source>Capture UI during scrolling screenshots</source>
+            <translation>Capture UI during scrolling screenshots</translation>
         </message>
         <message>
             <source>Cartoonist</source>
@@ -379,20 +399,20 @@
             <translation>Current brush eraser width</translation>
         </message>
         <message>
+            <source>Current brush filter width</source>
+            <translation>Current brush filter width</translation>
+        </message>
+        <message>
+            <source>Current brush highlight width</source>
+            <translation>Current brush highlight width</translation>
+        </message>
+        <message>
             <source>Current distance stroke width</source>
             <translation>Current distance stroke width</translation>
         </message>
         <message>
             <source>Current magnifier stroke width</source>
             <translation>Current magnifier stroke width</translation>
-        </message>
-        <message>
-            <source>Current pen filter width</source>
-            <translation>Current pen filter width</translation>
-        </message>
-        <message>
-            <source>Current pen highlight width</source>
-            <translation>Current pen highlight width</translation>
         </message>
         <message>
             <source>Current sequence number font size</source>
@@ -439,8 +459,8 @@
             <translation>Decimal places</translation>
         </message>
         <message>
-            <source>Dedicated Model</source>
-            <translation>Dedicated Model</translation>
+            <source>Dedicated model</source>
+            <translation>Dedicated model</translation>
         </message>
         <message>
             <source>Default</source>
@@ -459,8 +479,8 @@
             <translation>Delete</translation>
         </message>
         <message>
-            <source>Delete Annotation Template</source>
-            <translation>Delete Annotation Template</translation>
+            <source>Delete annotation template</source>
+            <translation>Delete annotation template</translation>
         </message>
         <message>
             <source>Delete annotation template "%1"? This action cannot be undone</source>
@@ -531,16 +551,16 @@
             <translation>Edit selection</translation>
         </message>
         <message>
-            <source>Effect Settings</source>
-            <translation>Effect Settings</translation>
+            <source>Effect settings</source>
+            <translation>Effect settings</translation>
         </message>
         <message>
             <source>Elbow arrow</source>
             <translation>Elbow arrow</translation>
         </message>
         <message>
-            <source>Element Eraser</source>
-            <translation>Element Eraser</translation>
+            <source>Element eraser</source>
+            <translation>Element eraser</translation>
         </message>
         <message>
             <source>Ellipse</source>
@@ -627,8 +647,8 @@
             <translation>Exit</translation>
         </message>
         <message>
-            <source>Export Settings</source>
-            <translation>Export Settings</translation>
+            <source>Export settings</source>
+            <translation>Export settings</translation>
         </message>
         <message>
             <source>Fill color</source>
@@ -727,8 +747,8 @@
             <translation>Highlight outline width %1px</translation>
         </message>
         <message>
-            <source>Horizontal Crop</source>
-            <translation>Horizontal Crop</translation>
+            <source>Horizontal crop</source>
+            <translation>Horizontal crop</translation>
         </message>
         <message>
             <source>Horizontal scrolling</source>
@@ -743,12 +763,12 @@
             <translation>Image</translation>
         </message>
         <message>
-            <source>Image Editing</source>
-            <translation>Image Editing</translation>
+            <source>Image editing</source>
+            <translation>Image editing</translation>
         </message>
         <message>
-            <source>Image Splitting</source>
-            <translation>Image Splitting</translation>
+            <source>Image splitting</source>
+            <translation>Image splitting</translation>
         </message>
         <message>
             <source>Integers</source>
@@ -763,28 +783,28 @@
             <translation>Italic</translation>
         </message>
         <message>
-            <source>Jump to Translation Page</source>
-            <translation>Jump to Translation Page</translation>
+            <source>Jump to translation page</source>
+            <translation>Jump to translation page</translation>
         </message>
         <message>
-            <source>Keyboard Background Color</source>
-            <translation>Keyboard Background Color</translation>
+            <source>Keyboard background color</source>
+            <translation>Keyboard background color</translation>
         </message>
         <message>
-            <source>Keyboard Foreground Color</source>
-            <translation>Keyboard Foreground Color</translation>
+            <source>Keyboard foreground color</source>
+            <translation>Keyboard foreground color</translation>
         </message>
         <message>
-            <source>Keyboard Size</source>
-            <translation>Keyboard Size</translation>
+            <source>Keyboard size</source>
+            <translation>Keyboard size</translation>
         </message>
         <message>
-            <source>LaTeX Formula Recognition</source>
-            <translation>LaTeX Formula Recognition</translation>
+            <source>LaTeX formula recognition</source>
+            <translation>LaTeX formula recognition</translation>
         </message>
         <message>
-            <source>LaTeX-Specific Model</source>
-            <translation>LaTeX-Specific Model</translation>
+            <source>LaTeX-specific model</source>
+            <translation>LaTeX-specific model</translation>
         </message>
         <message>
             <source>Laser pointer</source>
@@ -819,8 +839,8 @@
             <translation>Line</translation>
         </message>
         <message>
-            <source>Logical Pixel Selection</source>
-            <translation>Logical Pixel Selection</translation>
+            <source>Logical pixel selection</source>
+            <translation>Logical pixel selection</translation>
         </message>
         <message>
             <source>Lowercase letters</source>
@@ -879,10 +899,6 @@
             <translation>Mosaic</translation>
         </message>
         <message>
-            <source>Mouse Trail Duration</source>
-            <translation>Mouse Trail Duration</translation>
-        </message>
-        <message>
             <source>Mouse click color</source>
             <translation>Mouse click color</translation>
         </message>
@@ -923,6 +939,10 @@
             <translation>Mouse trail color transparent</translation>
         </message>
         <message>
+            <source>Mouse trail duration</source>
+            <translation>Mouse trail duration</translation>
+        </message>
+        <message>
             <source>Move selection horizontally (press and hold to drag)</source>
             <translation>Move selection horizontally (press and hold to drag)</translation>
         </message>
@@ -949,6 +969,10 @@
         <message>
             <source>Number keys</source>
             <translation>Number keys</translation>
+        </message>
+        <message>
+            <source>Only available for multi-region selections</source>
+            <translation>Only available for multi-region selections</translation>
         </message>
         <message>
             <source>Opacity</source>
@@ -979,48 +1003,20 @@
             <translation>Pause recording</translation>
         </message>
         <message>
-            <source>Pen</source>
-            <translation>Pen</translation>
-        </message>
-        <message>
-            <source>Pen filter</source>
-            <translation>Pen filter</translation>
-        </message>
-        <message>
-            <source>Pen filter width %1 (%2px)</source>
-            <translation>Pen filter width %1 (%2px)</translation>
-        </message>
-        <message>
-            <source>Pen highlight</source>
-            <translation>Pen highlight</translation>
-        </message>
-        <message>
-            <source>Pen highlight color</source>
-            <translation>Pen highlight color</translation>
-        </message>
-        <message>
-            <source>Pen highlight color %1</source>
-            <translation>Pen highlight color %1</translation>
-        </message>
-        <message>
-            <source>Pen highlight width %1 (%2px)</source>
-            <translation>Pen highlight width %1 (%2px)</translation>
-        </message>
-        <message>
-            <source>Physical Pixel Selection</source>
-            <translation>Physical Pixel Selection</translation>
+            <source>Physical pixel selection</source>
+            <translation>Physical pixel selection</translation>
         </message>
         <message>
             <source>Pick color from canvas</source>
             <translation>Pick color from canvas</translation>
         </message>
         <message>
-            <source>Pin Window to Screen</source>
-            <translation>Pin Window to Screen</translation>
-        </message>
-        <message>
             <source>Pin to screen</source>
             <translation>Pin to screen</translation>
+        </message>
+        <message>
+            <source>Pin window to screen</source>
+            <translation>Pin window to screen</translation>
         </message>
         <message>
             <source>Plain shaft</source>
@@ -1055,8 +1051,8 @@
             <translation>Print</translation>
         </message>
         <message>
-            <source>Progress Bar Color</source>
-            <translation>Progress Bar Color</translation>
+            <source>Progress bar color</source>
+            <translation>Progress bar color</translation>
         </message>
         <message>
             <source>Punctuation</source>
@@ -1095,8 +1091,8 @@
             <translation>Record screen</translation>
         </message>
         <message>
-            <source>Record speakers</source>
-            <translation>Record speakers</translation>
+            <source>Record system audio</source>
+            <translation>Record system audio</translation>
         </message>
         <message>
             <source>Record webcam</source>
@@ -1111,16 +1107,12 @@
             <translation>Recording format</translation>
         </message>
         <message>
-            <source>Recording settings</source>
-            <translation>Recording settings</translation>
-        </message>
-        <message>
             <source>Rectangle</source>
             <translation>Rectangle</translation>
         </message>
         <message>
-            <source>Rectangle Eraser</source>
-            <translation>Rectangle Eraser</translation>
+            <source>Rectangle eraser</source>
+            <translation>Rectangle eraser</translation>
         </message>
         <message>
             <source>Rectangle filter</source>
@@ -1167,8 +1159,12 @@
             <translation>Save as file</translation>
         </message>
         <message>
-            <source>Save to File</source>
-            <translation>Save to File</translation>
+            <source>Save to file</source>
+            <translation>Save to file</translation>
+        </message>
+        <message>
+            <source>Screen recording settings</source>
+            <translation>Screen recording settings</translation>
         </message>
         <message>
             <source>Scrolling screenshot</source>
@@ -1201,6 +1197,10 @@
         <message>
             <source>Send to back</source>
             <translation>Send to back</translation>
+        </message>
+        <message>
+            <source>Sequence number</source>
+            <translation>Sequence number</translation>
         </message>
         <message>
             <source>Sequence number (scroll to adjust)</source>
@@ -1243,10 +1243,6 @@
             <translation>Sequence number type</translation>
         </message>
         <message>
-            <source>Serial number</source>
-            <translation>Serial number</translation>
-        </message>
-        <message>
             <source>Settings</source>
             <translation>Settings</translation>
         </message>
@@ -1255,20 +1251,12 @@
             <translation>Shape</translation>
         </message>
         <message>
-            <source>Show Cursor</source>
-            <translation>Show Cursor</translation>
+            <source>Show QR code</source>
+            <translation>Show QR code</translation>
         </message>
         <message>
-            <source>Show Playback Time</source>
-            <translation>Show Playback Time</translation>
-        </message>
-        <message>
-            <source>Show Progress Bar</source>
-            <translation>Show Progress Bar</translation>
-        </message>
-        <message>
-            <source>Show QR Code</source>
-            <translation>Show QR Code</translation>
+            <source>Show cursor</source>
+            <translation>Show cursor</translation>
         </message>
         <message>
             <source>Show cursor in recording</source>
@@ -1283,8 +1271,16 @@
             <translation>Show original image</translation>
         </message>
         <message>
-            <source>Smart Erase</source>
-            <translation>Smart Erase</translation>
+            <source>Show playback time</source>
+            <translation>Show playback time</translation>
+        </message>
+        <message>
+            <source>Show progress bar</source>
+            <translation>Show progress bar</translation>
+        </message>
+        <message>
+            <source>Smart erase</source>
+            <translation>Smart erase</translation>
         </message>
         <message>
             <source>Snow Shot visual understanding</source>
@@ -1323,8 +1319,8 @@
             <translation>Source region outline</translation>
         </message>
         <message>
-            <source>Speech Bubble</source>
-            <translation>Speech Bubble</translation>
+            <source>Speech bubble</source>
+            <translation>Speech bubble</translation>
         </message>
         <message>
             <source>Split cells</source>
@@ -1435,8 +1431,8 @@
             <translation>Table recognition</translation>
         </message>
         <message>
-            <source>Table-Specific Model</source>
-            <translation>Table-Specific Model</translation>
+            <source>Table-specific model</source>
+            <translation>Table-specific model</translation>
         </message>
         <message>
             <source>Tapered shaft</source>
@@ -1447,8 +1443,8 @@
             <translation>Tapered shafts support standard, triangle, triangle outline, and indented triangle arrowheads</translation>
         </message>
         <message>
-            <source>Target Language</source>
-            <translation>Target Language</translation>
+            <source>Target language</source>
+            <translation>Target language</translation>
         </message>
         <message>
             <source>Template</source>
@@ -1459,12 +1455,12 @@
             <translation>Template %1</translation>
         </message>
         <message>
-            <source>Template Name</source>
-            <translation>Template Name</translation>
+            <source>Template name</source>
+            <translation>Template name</translation>
         </message>
         <message>
-            <source>Template Value</source>
-            <translation>Template Value</translation>
+            <source>Template value</source>
+            <translation>Template value</translation>
         </message>
         <message>
             <source>Text</source>
@@ -1539,8 +1535,8 @@
             <translation>Text translation</translation>
         </message>
         <message>
-            <source>Thought Bubble</source>
-            <translation>Thought Bubble</translation>
+            <source>Thought bubble</source>
+            <translation>Thought bubble</translation>
         </message>
         <message>
             <source>Translation service</source>
@@ -1555,8 +1551,8 @@
             <translation>Transparent</translation>
         </message>
         <message>
-            <source>Trim Video</source>
-            <translation>Trim Video</translation>
+            <source>Trim video</source>
+            <translation>Trim video</translation>
         </message>
         <message>
             <source>Unable to save scrolling screenshot settings</source>
@@ -1567,24 +1563,24 @@
             <translation>Undo</translation>
         </message>
         <message>
-            <source>Upload to Cloud</source>
-            <translation>Upload to Cloud</translation>
+            <source>Upload to cloud</source>
+            <translation>Upload to cloud</translation>
         </message>
         <message>
             <source>Uppercase letters</source>
             <translation>Uppercase letters</translation>
         </message>
         <message>
-            <source>Vertical Crop</source>
-            <translation>Vertical Crop</translation>
+            <source>Vertical crop</source>
+            <translation>Vertical crop</translation>
         </message>
         <message>
             <source>Vertical scrolling</source>
             <translation>Vertical scrolling</translation>
         </message>
         <message>
-            <source>Vision Model</source>
-            <translation>Vision Model</translation>
+            <source>Vision model</source>
+            <translation>Vision model</translation>
         </message>
         <message>
             <source>Watermark</source>
@@ -1619,12 +1615,12 @@
             <translation>Watermark text</translation>
         </message>
         <message>
-            <source>Webcam Shape</source>
-            <translation>Webcam Shape</translation>
+            <source>Webcam shape</source>
+            <translation>Webcam shape</translation>
         </message>
         <message>
-            <source>Webcam Size</source>
-            <translation>Webcam Size</translation>
+            <source>Webcam size</source>
+            <translation>Webcam size</translation>
         </message>
         <message>
             <source>Yellow</source>

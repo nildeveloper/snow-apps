@@ -360,7 +360,7 @@ void recordingControlsRemainLaidOutAcrossStateChanges() {
     QCoreApplication::processEvents();
 
     const char* sources[] = {"Start recording",       "Stop recording",    "Pause recording",
-                             "Resume recording",      "Record microphone", "Record speakers",
+                             "Resume recording",      "Record microphone", "Record system audio",
                              "Open recording folder", "Close recording",   "Copy recording"};
     QVector<adqt::widgets::AdButton*> buttons;
     for (const char* source : sources) {
@@ -861,10 +861,10 @@ void recordingPostProcessingOptionsBindState() {
         require(progress && playback &&
                     button->accessibleName() == translated("Post-processing effects") &&
                     button->toolTip() == translated("Post-processing effects") &&
-                    progress->text() == translated("Show Progress Bar") &&
-                    progress->accessibleName() == translated("Show Progress Bar") &&
-                    playback->text() == translated("Show Playback Time") &&
-                    playback->accessibleName() == translated("Show Playback Time") &&
+                    progress->text() == translated("Show progress bar") &&
+                    progress->accessibleName() == translated("Show progress bar") &&
+                    playback->text() == translated("Show playback time") &&
+                    playback->accessibleName() == translated("Show playback time") &&
                     playback->isChecked(),
                 "language changes must retranslate options and preserve their choice");
     }
@@ -1063,7 +1063,7 @@ void recordingEffectSettingsModal() {
                 modal->windowModality() == Qt::ApplicationModal && modal->centered() &&
                 !modal->maskVisible() && !modal->closeOnMaskClick() &&
                 modal->ownerWindow() == &recordingOwner &&
-                modal->windowTitle() == QStringLiteral("Effect Settings") &&
+                modal->windowTitle() == QStringLiteral("Effect settings") &&
                 modal->standardButtons() == adqt::widgets::AdModal::StandardButton::Ok,
             "settings must use the selection editor's Windows-style modal conventions");
     require((modal->contentWidget()->window()->frameGeometry().center() -
@@ -1144,7 +1144,7 @@ void recordingEffectSettingsModal() {
         require(language.setLanguage(locale), "progress bar color translation catalog must load");
         QCoreApplication::processEvents();
         const auto label =
-            QCoreApplication::translate("ScreenshotToolPalette", "Progress Bar Color");
+            QCoreApplication::translate("ScreenshotToolPalette", "Progress bar color");
         require(form->field(QStringLiteral("progressBarColor"))->label() == label &&
                     opened.progressBar->accessibleName() == label,
                 "progress bar color label and accessible name must retranslate in place");
@@ -1156,9 +1156,9 @@ void recordingEffectSettingsModal() {
                             ->accessibleName() == radiusLabel,
                 "highlight radius label and accessible name retranslate in place");
         const auto webcamSizeLabel =
-            QCoreApplication::translate("ScreenshotToolPalette", "Webcam Size");
+            QCoreApplication::translate("ScreenshotToolPalette", "Webcam size");
         const auto webcamShapeLabel =
-            QCoreApplication::translate("ScreenshotToolPalette", "Webcam Shape");
+            QCoreApplication::translate("ScreenshotToolPalette", "Webcam shape");
         require(form->field(QStringLiteral("webcamSize"))->label() == webcamSizeLabel &&
                     webcamSize->accessibleName() == webcamSizeLabel &&
                     form->field(QStringLiteral("webcamShape"))->label() == webcamShapeLabel &&
@@ -1273,7 +1273,7 @@ void recordingEffectSettingsModal() {
                 foregroundChanges == foregroundChangesBeforeRebuild,
             "rebuilding settings must not emit effect change signals");
     require(!reopened.form->disabled() &&
-                reopened.modal->windowTitle() == QStringLiteral("Effect Settings") &&
+                reopened.modal->windowTitle() == QStringLiteral("Effect settings") &&
                 !reopened.duration->suffixText().isEmpty() &&
                 reopened.keyboardSize->suffixText() == QStringLiteral("px"),
             "a rebuilt form must be enabled and retranslated before it is shown");
@@ -1325,7 +1325,7 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
     options.showDragHandle = true;
     options.showShapeTool = true;
     options.showHighlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.showSpotlightTool = true;
     options.showEraserTool = true;
     options.showFilterTool = true;
@@ -1351,7 +1351,7 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
                      [&settingsRequests] { ++settingsRequests; });
     preferences->click();
     require(settingsRequests == 1 &&
-                preferences->accessibleName() == QStringLiteral("Recording settings"),
+                preferences->accessibleName() == QStringLiteral("Screen recording settings"),
             "recording settings must request its window with an accessible label");
     auto* format =
         palette.findChild<adqt::widgets::AdSelect*>(QStringLiteral("screenRecordingOutputFormat"));
@@ -1420,8 +1420,8 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
     require(filterButton->isEnabled() && (!filterIconColor.has_value() ||
                                           filterIconColor->rgba() != disabledIconColor.rgba()),
             "recording filters should be enabled and use the normal tool icon color");
-    require(exportButton->toolTip() == QStringLiteral("Export Settings") &&
-                exportButton->accessibleName() == QStringLiteral("Export Settings") &&
+    require(exportButton->toolTip() == QStringLiteral("Export settings") &&
+                exportButton->accessibleName() == QStringLiteral("Export settings") &&
                 adqt::icons::describeIcon(exportButton->iconRef()).key.name ==
                     QStringLiteral("export-settings") &&
                 format->accessibleName() == QStringLiteral("Recording format") &&
@@ -1701,12 +1701,11 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
             "selecting a recording filter should activate drawing and close Export Settings");
     shapeButton->click();
     shapeButton->click();
-    require(!exportPanel->isVisible() &&
-                palette.activeToolForTests() == ScreenshotToolPalette::Tool::Select &&
+    require(exportPanel->isVisible() && !palette.activeToolForTests().has_value() &&
                 !palette.styleToolbarVisible() &&
                 shapeButton->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Text &&
                 selectRequests == 2,
-            "clicking the active drawing button must return to Select");
+            "clicking the active drawing button must restore Export settings");
     exportButton->click();
 
     int formatChanges = 0;
@@ -1827,7 +1826,7 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
         const QString source = button->property("snowShotTranslationTooltipSource").toString();
         if (source == QStringLiteral("Record microphone")) {
             microphone = button;
-        } else if (source == QStringLiteral("Record speakers")) {
+        } else if (source == QStringLiteral("Record system audio")) {
             systemAudio = button;
         }
     }
@@ -1877,10 +1876,10 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
         shapeButton->click();
         const int selectRequestsBeforeClick = selectRequests;
         shapeButton->click();
-        require(palette.activeToolForTests() == ScreenshotToolPalette::Tool::Select &&
-                    !palette.recordingExportSettingsVisible() && !palette.styleToolbarVisible() &&
+        require(!palette.activeToolForTests().has_value() &&
+                    palette.recordingExportSettingsVisible() && !palette.styleToolbarVisible() &&
                     selectRequests == selectRequestsBeforeClick + 1,
-                "clicking active drawing during recording must return to Select");
+                "clicking active drawing during recording must restore Export settings");
         shapeButton->click();
         require(palette.activeToolForTests() == ScreenshotToolPalette::Tool::Shape,
                 "a deactivated drawing tool should activate on the next click");
@@ -1917,7 +1916,7 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
 
     QEvent languageChange(QEvent::LanguageChange);
     QCoreApplication::sendEvent(&palette, &languageChange);
-    require(exportButton->toolTip() == QStringLiteral("Export Settings") &&
+    require(exportButton->toolTip() == QStringLiteral("Export settings") &&
                 format->accessibleName() == QStringLiteral("Recording format") &&
                 cursor->accessibleName() == QStringLiteral("Show cursor in recording") &&
                 keyboard->accessibleName() == QStringLiteral("Show keystrokes in recording"),
@@ -1951,7 +1950,7 @@ void dynamicToolbarLabelsUseEveryTranslationCatalog() {
     ScreenshotToolPalette::Options filterOptions;
     filterOptions.showFilterTool = true;
     ScreenshotToolPalette filterPalette(filterOptions);
-    filterPalette.setActiveTool(ScreenshotToolPalette::Tool::PenFilter);
+    filterPalette.setActiveTool(ScreenshotToolPalette::Tool::BrushFilter);
     auto* filterTypes = filterPalette.findChild<adqt::widgets::AdSelect*>(
         QStringLiteral("screenshotPenFilterTypeSelect"));
     require(filterTypes != nullptr && filterTypes->model() != nullptr,
@@ -2019,8 +2018,8 @@ void dynamicToolbarLabelsUseEveryTranslationCatalog() {
                     "dynamic toolbar labels must use the active translation catalog");
         }
         const QString cursorLabel =
-            QCoreApplication::translate("ScreenshotToolPalette", "Show Cursor");
-        require(cursorLabel != QStringLiteral("Show Cursor") &&
+            QCoreApplication::translate("ScreenshotToolPalette", "Show cursor");
+        require(cursorLabel != QStringLiteral("Show cursor") &&
                     cursorButton->toolTip().startsWith(cursorLabel),
                 "Show Cursor must retranslate with its configurable shortcut");
         cursorPalette.setCursorAvailable(false);
@@ -2277,9 +2276,9 @@ void shapeAndArrowStrokeEditorsShareThePresetCatalog() {
 
 void sizePresetEditorsShareTheSizeCatalog() {
     ScreenshotToolPalette palette(ScreenshotToolPalette::Options{});
-    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::PenHighlight),
+    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::BrushHighlight),
             "pen highlight style family should materialize on demand");
-    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::PenFilter),
+    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::BrushFilter),
             "pen filter style family should materialize on demand");
     require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::Text),
             "text style family should materialize on demand");
@@ -2299,7 +2298,7 @@ void sizePresetEditorsShareTheSizeCatalog() {
     };
 
     for (const QString& prefix :
-         {QStringLiteral("Pen highlight width "), QStringLiteral("Pen filter width "),
+         {QStringLiteral("Brush highlight width "), QStringLiteral("Brush filter width "),
           QStringLiteral("Text font size ")}) {
         const QStringList tooltips = presetTooltips(prefix);
         require(tooltips.size() == 4, "size preset editors should render the S/M/L/XL quartet");
@@ -2376,16 +2375,15 @@ void styleToolSwitchesReconcileCompatibleEditorRoots() {
             "Shape to Line should replace the two Shape-only editors with the Line type editor");
 
     QWidget* lineFillRoot = styleEditorRoot(lineRow, "shape-fill");
-    palette.setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
-    QWidget* freeDrawRow =
+    palette.setActiveTool(ScreenshotToolPalette::Tool::Brush);
+    QWidget* brushRow =
         palette.findChild<QWidget*>(QStringLiteral("screenshotFreeDrawStyleControls"));
-    const auto lineToFreeDraw = palette.lastStyleReconcileStatsForTests();
-    require(styleEditorRoot(freeDrawRow, "outline-stroke") == strokeRoot &&
-                styleEditorRoot(freeDrawRow, "outline-width") == widthRoot &&
-                styleEditorRoot(freeDrawRow, "shape-fill") == lineFillRoot,
+    const auto lineToBrush = palette.lastStyleReconcileStatsForTests();
+    require(styleEditorRoot(brushRow, "outline-stroke") == strokeRoot &&
+                styleEditorRoot(brushRow, "outline-width") == widthRoot &&
+                styleEditorRoot(brushRow, "shape-fill") == lineFillRoot,
             "Line to Free Draw should preserve all style editor subtrees");
-    require(lineToFreeDraw.retained == 3 && lineToFreeDraw.destroyed == 1 &&
-                lineToFreeDraw.created == 1,
+    require(lineToBrush.retained == 3 && lineToBrush.destroyed == 1 && lineToBrush.created == 1,
             "Line to Free Draw should replace the Line type editor with Brush mode");
 }
 
@@ -2397,23 +2395,23 @@ void styleToolReuseMapPreservesEveryCompatibleRole() {
             return QStringLiteral("screenshotRectangleStyleControls");
         case Tool::Line:
             return QStringLiteral("screenshotLineStyleControls");
-        case Tool::FreeDraw:
+        case Tool::Brush:
             return QStringLiteral("screenshotFreeDrawStyleControls");
         case Tool::Arrow:
             return QStringLiteral("screenshotArrowStyleControls");
         case Tool::RectangleHighlight:
             return QStringLiteral("screenshotHighlightStyleControls");
-        case Tool::PenHighlight:
+        case Tool::BrushHighlight:
             return QStringLiteral("screenshotPenHighlightStyleControls");
         case Tool::RectangleFilter:
             return QStringLiteral("screenshotFilterStyleControls");
-        case Tool::PenFilter:
+        case Tool::BrushFilter:
             return QStringLiteral("screenshotPenFilterStyleControls");
         case Tool::Spotlight:
             return QStringLiteral("screenshotSpotlightStyleControls");
         case Tool::Text:
             return QStringLiteral("screenshotTextStyleControls");
-        case Tool::SerialNumber:
+        case Tool::SequenceNumber:
             return QStringLiteral("screenshotSerialNumberStyleControls");
         case Tool::Watermark:
             return QStringLiteral("screenshotWatermarkStyleControls");
@@ -2454,12 +2452,12 @@ void styleToolReuseMapPreservesEveryCompatibleRole() {
                 "the style reuse map should report exact retained/created/destroyed counts");
     };
 
-    verify(Tool::RectangleHighlight, Tool::PenHighlight, {"highlight-mode", "highlight-color"}, 1,
+    verify(Tool::RectangleHighlight, Tool::BrushHighlight, {"highlight-mode", "highlight-color"}, 1,
            1);
-    verify(Tool::RectangleFilter, Tool::PenFilter,
+    verify(Tool::RectangleFilter, Tool::BrushFilter,
            {"filter-mode", "filter-type", "filter-intensity"}, 0, 1);
-    verify(Tool::Text, Tool::SerialNumber, {"foreground-color", "text-font", "text-fill"}, 4, 3);
-    verify(Tool::PenHighlight, Tool::PenFilter, {"brush-width"}, 2, 3);
+    verify(Tool::Text, Tool::SequenceNumber, {"foreground-color", "text-font", "text-fill"}, 4, 3);
+    verify(Tool::BrushHighlight, Tool::BrushFilter, {"brush-width"}, 2, 3);
     verify(Tool::Spotlight, Tool::Watermark, {"opacity"}, 3, 6);
     verify(Tool::Shape, Tool::Spotlight, {"shape-kind", "corner-radius"}, 3, 2);
     verify(Tool::Spotlight, Tool::Shape, {"shape-kind", "corner-radius"}, 2, 3);
@@ -2526,9 +2524,9 @@ void retainedOutlineEditorsRebindStateLabelsAndCommands() {
 void prewarmedDestinationMergesSourceSharedAndDestinationOnlyEditors() {
     ScreenshotToolPalette::Options options;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     ScreenshotToolPalette palette(options);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
 
     QWidget* serialRow =
         palette.findChild<QWidget*>(QStringLiteral("screenshotSerialNumberStyleControls"));
@@ -3104,14 +3102,14 @@ void recordingAudioStacksUseVisibleAnchorsWithoutCompetingHoverPopovers() {
     using snow_shot::storage::ScreenshotToolbarLayout;
     const auto kind = snow_shot::storage::ScreenshotToolbarLayoutKind::RecordingActionTools;
     const QString microphone = QStringLiteral("microphone");
-    const QString speakers = QStringLiteral("system-audio");
+    const QString systemAudio = QStringLiteral("system-audio");
     auto hidden = layout::defaultOrder(kind);
     hidden.removeAll(microphone);
-    hidden.removeAll(speakers);
+    hidden.removeAll(systemAudio);
     ScreenshotToolPalette::Options options;
     options.showRecordingControls = true;
     options.enableStyleToolbar = false;
-    options.actionToolsLayout = ScreenshotToolbarLayout{{{speakers, microphone}}, hidden};
+    options.actionToolsLayout = ScreenshotToolbarLayout{{{systemAudio, microphone}}, hidden};
     ScreenshotToolPalette palette(options);
     palette.show();
     palette.prepareForDisplay();
@@ -3126,8 +3124,8 @@ void recordingAudioStacksUseVisibleAnchorsWithoutCompetingHoverPopovers() {
     auto* trigger = palette.findChild<adqt::widgets::AdButton*>(
         QStringLiteral("screenshotActionToolGroupButton0"));
     auto* gain = palette.recordingAudioGainPopover(true);
-    auto* speakersGain = palette.recordingAudioGainPopover(false);
-    require(trigger && gain && speakersGain && gain->trigger() == trigger &&
+    auto* systemAudioGain = palette.recordingAudioGainPopover(false);
+    require(trigger && gain && systemAudioGain && gain->trigger() == trigger &&
                 gain->popover()->triggers() == adqt::widgets::AdPopover::Triggers{},
             "a selected stacked audio action uses its visible trigger without another Hover popup");
     palette.setRecordingMicrophoneEnabled(true);
@@ -3142,12 +3140,12 @@ void recordingAudioStacksUseVisibleAnchorsWithoutCompetingHoverPopovers() {
             "clicking selected stacked audio opens gain against the visible toolbar trigger");
     gain->close();
     materializeLazyPopover(trigger);
-    popoverButtonWithTooltip(groupPopover, "Record speakers")->click();
-    require(trigger->property("screenshotToolbarItemId") == speakers &&
-                speakersGain->trigger() == trigger && gain->trigger() != trigger &&
-                speakersGain->popover()->isVisible() && !gain->popover()->isVisible(),
+    popoverButtonWithTooltip(groupPopover, "Record system audio")->click();
+    require(trigger->property("screenshotToolbarItemId") == systemAudio &&
+                systemAudioGain->trigger() == trigger && gain->trigger() != trigger &&
+                systemAudioGain->popover()->isVisible() && !gain->popover()->isVisible(),
             "switching stacked audio rebinds its gain anchor and preserves exclusive popovers");
-    speakersGain->close();
+    systemAudioGain->close();
     palette.setRecordingOutputFormat(QStringLiteral("gif"));
     require(!trigger->isEnabled() &&
                 trigger->toolTip() ==
@@ -3200,9 +3198,9 @@ void scrollingScreenshotKeepsDrawingToolsAvailable() {
     options.showShapeTool = true;
     options.showArrowTool = true;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showFilterTool = true;
     options.showEraserTool = true;
     options.showWatermarkTool = true;
@@ -3223,8 +3221,8 @@ void scrollingScreenshotKeepsDrawingToolsAvailable() {
                 selectRequestCount == 1,
             "the Select drawing shortcut must activate the selection tool and request it");
     const char* const drawingTools[] = {
-        "Select elements", "Shape",  "Arrow",  "Line",      "Pen", "Text",
-        "Serial number",   "Filter", "Eraser", "Watermark",
+        "Select elements", "Shape",  "Arrow",  "Line",      "Brush", "Text",
+        "Sequence number", "Filter", "Eraser", "Watermark",
     };
     const char* const enabledDuringScrolling[] = {
         "Edit selection", "Text recognition", "Table recognition", "Scrolling screenshot",
@@ -3266,11 +3264,11 @@ void screenshotToolbarUsesCanonicalOrderAndSectionSeparators() {
     options.showShapeTool = true;
     options.showArrowTool = true;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showHighlightTool = true;
     options.showSpotlightTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showFilterTool = true;
     options.showEraserTool = true;
     options.showWatermarkTool = true;
@@ -3292,10 +3290,10 @@ void screenshotToolbarUsesCanonicalOrderAndSectionSeparators() {
         shortcutTooltip(QStringLiteral("Select elements"), {QStringLiteral("V")}),
         shortcutTooltip(QStringLiteral("Shape"), {QStringLiteral("1")}),
         shortcutTooltip(QStringLiteral("Arrow"), {QStringLiteral("2")}),
-        shortcutTooltip(QStringLiteral("Pen"), {QStringLiteral("3"), QStringLiteral("P")}),
+        shortcutTooltip(QStringLiteral("Brush"), {QStringLiteral("3"), QStringLiteral("P")}),
         shortcutTooltip(QStringLiteral("Highlight"), {QStringLiteral("4"), QStringLiteral("H")}),
         shortcutTooltip(QStringLiteral("Text"), {QStringLiteral("5"), QStringLiteral("T")}),
-        shortcutTooltip(QStringLiteral("Serial number"),
+        shortcutTooltip(QStringLiteral("Sequence number"),
                         {QStringLiteral("6"), QStringLiteral("N")}),
         shortcutTooltip(QStringLiteral("Filter"), {QStringLiteral("7"), QStringLiteral("F")}),
         shortcutTooltip(QStringLiteral("Eraser"), {QStringLiteral("8"), QStringLiteral("E")}),
@@ -3801,6 +3799,12 @@ void toolbarGroupsKeepFirstButtonWhenEnabled() {
         ScreenshotToolPalette::Options options;
         options.showLineTool = true;
         options.showRecordingControls = kind == ScreenshotToolbarLayoutKind::RecordingActionTools;
+        options.recordingDrawingMode = options.showRecordingControls;
+        options.showMoveTool = !options.showRecordingControls;
+        options.moveToolPresentation =
+            kind == ScreenshotToolbarLayoutKind::PinnedActionTools
+                ? ScreenshotToolPalette::MoveToolPresentation::ResizeWindow
+                : ScreenshotToolPalette::MoveToolPresentation::EditSelection;
         options.actionToolsLayoutKind = kind;
         options.enableStyleToolbar = false;
         options.toolbarLayout = ScreenshotToolbarLayout{
@@ -3826,8 +3830,10 @@ void toolbarGroupsKeepFirstButtonWhenEnabled() {
         require(palette.activeTool() == ScreenshotToolPalette::Tool::Shape,
                 "clicking the fixed group button must activate its displayed tool");
         trigger->click();
-        require(palette.activeTool() == ScreenshotToolPalette::Tool::Select,
-                "clicking the active first tool must still toggle back to selection");
+        require(options.recordingDrawingMode
+                    ? !palette.activeTool().has_value() && palette.recordingExportSettingsVisible()
+                    : palette.activeTool() == ScreenshotToolPalette::Tool::Move,
+                "clicking the active first tool must return to its toolbar's default");
         materializeLazyPopover(trigger);
         auto* line = popoverButtonWithTooltip(popoverForTrigger(trigger), "Line");
         require(line != nullptr, "the fixed group must still expose its other tools");
@@ -4039,7 +4045,7 @@ void configurableToolbarLayoutSupportsArbitraryPopoverGroups() {
     options.showAngleTool = false;
     options.showBracketTool = false;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showHighlightTool = true;
     options.showSpotlightTool = true;
     options.showHistoryActions = true;
@@ -4086,7 +4092,7 @@ void configurableToolbarLayoutSupportsArbitraryPopoverGroups() {
     materializeLazyPopover(firstTrigger);
     auto* shapeOption = popoverButtonWithTooltip(firstPopover, "Shape");
     auto* lineOption = popoverButtonWithTooltip(firstPopover, "Line");
-    auto* penOption = popoverButtonWithTooltip(firstPopover, "Pen");
+    auto* penOption = popoverButtonWithTooltip(firstPopover, "Brush");
     require(firstPopover != nullptr && shapeOption != nullptr && lineOption != nullptr &&
                 penOption != nullptr &&
                 qobject_cast<QHBoxLayout*>(firstPopover->contentWidget()->layout()) != nullptr &&
@@ -4105,24 +4111,24 @@ void configurableToolbarLayoutSupportsArbitraryPopoverGroups() {
                     secondPopover->contentWidget()->layout()->indexOf(spotlightOption),
             "the second group popover should present configured tools from main to top");
 
-    int freeDrawRequests = 0;
+    int brushRequests = 0;
     int spotlightRequests = 0;
-    QObject::connect(&palette, &ScreenshotToolPalette::freeDrawRequested,
-                     [&freeDrawRequests]() { ++freeDrawRequests; });
+    QObject::connect(&palette, &ScreenshotToolPalette::brushRequested,
+                     [&brushRequests]() { ++brushRequests; });
     QObject::connect(&palette, &ScreenshotToolPalette::spotlightRequested,
                      [&spotlightRequests]() { ++spotlightRequests; });
     materializeLazyPopover(firstTrigger);
-    penOption = popoverButtonWithTooltip(firstPopover, "Pen");
+    penOption = popoverButtonWithTooltip(firstPopover, "Brush");
     require(penOption != nullptr, "reopening the first drawing group should recreate Pen");
     penOption->click();
-    require(freeDrawRequests == 1 &&
-                palette.activeToolForTests() == ScreenshotToolPalette::Tool::FreeDraw &&
-                firstTrigger->accessibleName() == QStringLiteral("Pen") &&
+    require(brushRequests == 1 &&
+                palette.activeToolForTests() == ScreenshotToolPalette::Tool::Brush &&
+                firstTrigger->accessibleName() == QStringLiteral("Brush") &&
                 firstTrigger->property("screenshotToolbarItemId").toString() ==
                     QStringLiteral("free-draw"),
             "selecting an arbitrary group option should activate it and replace the trigger");
     firstTrigger->click();
-    require(freeDrawRequests == 1 &&
+    require(brushRequests == 1 &&
                 palette.activeToolForTests() == ScreenshotToolPalette::Tool::Select,
             "clicking an active arbitrary group trigger should return to selection");
     materializeLazyPopover(secondTrigger);
@@ -4156,8 +4162,8 @@ void configurableToolbarLayoutSupportsArbitraryPopoverGroups() {
         materializeLazyPopover(updatedGroupTrigger);
     }
     require(updatedDrawingButtons.size() == 6 && updatedPopover != nullptr &&
-                updatedGroupTrigger->accessibleName() == QStringLiteral("Pen") &&
-                popoverButtonWithTooltip(updatedPopover, "Pen") != nullptr &&
+                updatedGroupTrigger->accessibleName() == QStringLiteral("Brush") &&
+                popoverButtonWithTooltip(updatedPopover, "Brush") != nullptr &&
                 popoverButtonWithTooltip(updatedPopover, "Highlight") != nullptr &&
                 std::none_of(updatedDrawingButtons.cbegin(), updatedDrawingButtons.cend(),
                              [](const adqt::widgets::AdButton* button) {
@@ -4883,7 +4889,7 @@ void drawingGroupClicksActivateOnceAfterPointerReentry() {
         {QStringLiteral("free-draw"), QStringLiteral("line"), QStringLiteral("shape")},
         {QStringLiteral("shape"), QStringLiteral("distance")}};
     const QList<ScreenshotToolPalette::Tool> tools{
-        ScreenshotToolPalette::Tool::Arrow, ScreenshotToolPalette::Tool::PenHighlight,
+        ScreenshotToolPalette::Tool::Arrow, ScreenshotToolPalette::Tool::BrushHighlight,
         ScreenshotToolPalette::Tool::Shape, ScreenshotToolPalette::Tool::Distance};
     for (int index = 0; index < groups.size(); ++index) {
         ScreenshotToolPalette::Options options;
@@ -4892,7 +4898,7 @@ void drawingGroupClicksActivateOnceAfterPointerReentry() {
         options.showDistanceTool = groups.at(index).contains(QStringLiteral("distance"));
         options.showAngleTool = groups.at(index).contains(QStringLiteral("angle"));
         options.showLineTool = groups.at(index).contains(QStringLiteral("line"));
-        options.showFreeDrawTool = groups.at(index).contains(QStringLiteral("free-draw"));
+        options.showBrushTool = groups.at(index).contains(QStringLiteral("free-draw"));
         options.showHighlightTool = groups.at(index).contains(QStringLiteral("highlighter"));
         options.showSpotlightTool = groups.at(index).contains(QStringLiteral("spotlight"));
         options.showSpeechBubbleTool = groups.at(index).contains(QStringLiteral("speech-bubble"));
@@ -4983,7 +4989,7 @@ void toolbarStacksFollowConfiguredBottomToTopOrder() {
         options.showShapeTool = true;
         options.showArrowTool = true;
         options.showLineTool = true;
-        options.showFreeDrawTool = true;
+        options.showBrushTool = true;
         options.showTableTool = true;
         options.showQrTool = true;
         options.showImageConversionTools = conversionsAvailable;
@@ -6065,7 +6071,7 @@ void cloudUploadToolbarContracts() {
                 "cloud tool retains initial Save primary action");
         materializeLazyPopover(trigger);
         auto* popover = popoverForTrigger(trigger);
-        auto* option = popoverButtonWithTooltip(popover, "Upload to Cloud");
+        auto* option = popoverButtonWithTooltip(popover, "Upload to cloud");
         const auto* optionLayout = popover->contentWidget()->layout();
         require(option && !option->isEnabled() &&
                     optionLayout->indexOf(option) == optionLayout->count() - 1,
@@ -6086,14 +6092,14 @@ void cloudUploadToolbarContracts() {
         require(!palette.activateScreenshotShortcut(QStringLiteral("upload_to_cloud")),
                 "busy toolbar guards upload shortcut");
         materializeLazyPopover(trigger);
-        option = popoverButtonWithTooltip(popover, "Upload to Cloud");
+        option = popoverButtonWithTooltip(popover, "Upload to cloud");
         require(option && !option->isEnabled(), "busy toolbar disables cloud popover option");
         palette.setCloudUploadBusy(false);
         require(palette.activateScreenshotShortcut(QStringLiteral("upload_to_cloud")) &&
                     requests == 2,
                 "cloud shortcut shares toolbar request");
         materializeLazyPopover(trigger);
-        option = popoverButtonWithTooltip(popover, "Upload to Cloud");
+        option = popoverButtonWithTooltip(popover, "Upload to cloud");
         auto& language = snow_shot::presentation::LanguageManager::instance();
         require(language.setLanguage(QStringLiteral("zh_CN")), "translate cloud toolbar");
         QCoreApplication::processEvents();
@@ -6490,13 +6496,13 @@ void confirmActionRemainsSeparatedAndCallableForPinnedEditing() {
     options.showShapeTool = true;
     options.showArrowTool = true;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showHighlightTool = true;
     options.showEraserTool = true;
     options.showFilterTool = true;
     options.showWatermarkTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showSaveButton = true;
     options.saveButtonWithResultActions = true;
     options.copyButtonWithNeutralIcon = true;
@@ -6851,7 +6857,7 @@ void scrollingSettingsUseCenteredFormAndPersistOnAccept() {
     require(form && captureInterface && !captureInterface->isChecked() &&
                 form->formLayout() == AdForm::FormLayout::Vertical &&
                 form->field(QStringLiteral("captureInterface"))->label() ==
-                    QStringLiteral("Capture interface during scrolling screenshot"),
+                    QStringLiteral("Capture UI during scrolling screenshots"),
             "scrolling settings must expose the persisted option through a form switch");
     require(captureInterface->controlSize() == AdSwitch::ControlSize::Medium,
             "scrolling settings must use the generic form's medium-sized switch");
@@ -6933,7 +6939,7 @@ void scrollingSettingsUseCenteredFormAndPersistOnAccept() {
         require(language.setLanguage(locale), "load scrolling settings language");
         QCoreApplication::processEvents();
         const QString label = QCoreApplication::translate(
-            "ScreenshotToolPalette", "Capture interface during scrolling screenshot");
+            "ScreenshotToolPalette", "Capture UI during scrolling screenshots");
         require(form->field(QStringLiteral("captureInterface"))->label() == label &&
                     captureInterface->accessibleName() == label &&
                     modal->windowTitle() ==
@@ -6941,7 +6947,7 @@ void scrollingSettingsUseCenteredFormAndPersistOnAccept() {
                                                     "Scrolling screenshot settings"),
                 "open scrolling settings must retranslate its label and title");
         require(locale == QStringLiteral("en_US") ||
-                    label != QStringLiteral("Capture interface during scrolling screenshot"),
+                    label != QStringLiteral("Capture UI during scrolling screenshots"),
                 "each Chinese catalog must translate the new setting");
     }
     const QString snapshotDirectory =
@@ -7017,8 +7023,8 @@ void scrollingScreenshotExposesAxisRecognitionModes() {
     require(splitButton && editingButton && settingsButton && splitButton->isVisible() &&
                 editingButton->isVisible() && !editingButton->icon().isNull() &&
                 editingButton->text().isEmpty() &&
-                editingButton->toolTip() == QStringLiteral("Image Editing") &&
-                splitButton->toolTip() == QStringLiteral("Image Splitting") &&
+                editingButton->toolTip() == QStringLiteral("Image editing") &&
+                splitButton->toolTip() == QStringLiteral("Image splitting") &&
                 editingButton->x() - (splitButton->x() + splitButton->width()) == 4 &&
                 settingsButton->x() - (editingButton->x() + editingButton->width()) == 4,
             "Image Editing must appear between Image Splitting and Settings");
@@ -7257,9 +7263,9 @@ void scrollingScreenshotExposesAxisRecognitionModes() {
     QCoreApplication::processEvents();
     require(interval->toolTip() == englishTooltip,
             "scaling a translated interval editor must preserve its translation source");
-    require(splitButton->toolTip() == QStringLiteral("Image Splitting"),
+    require(splitButton->toolTip() == QStringLiteral("Image splitting"),
             "Image Splitting must restore its English caption after language changes");
-    require(editingButton->toolTip() == QStringLiteral("Image Editing"),
+    require(editingButton->toolTip() == QStringLiteral("Image editing"),
             "Image Editing must restore its English caption after language changes");
 }
 
@@ -7459,13 +7465,13 @@ void recognitionModelSelectorGroupsOptionsAndRetainsIndependentSelections() {
         for (qsizetype index = 0; index < grouped.size(); ++index) {
             require(grouped[index].value.toString() == expectedIds[index] &&
                         grouped[index].label == expectedLabels[index] && !grouped[index].disabled &&
-                        grouped[index].group == (index == 0 ? QStringLiteral("Dedicated Model")
-                                                            : QStringLiteral("Vision Model")),
+                        grouped[index].group == (index == 0 ? QStringLiteral("Dedicated model")
+                                                            : QStringLiteral("Vision model")),
                     "each grouped recognition option must preserve its exact model identity and "
                     "name, including the first server vision model");
         }
     };
-    requireCatalogOptions(QStringLiteral("Table-Specific Model"));
+    requireCatalogOptions(QStringLiteral("Table-specific model"));
     auto* layout = qobject_cast<QBoxLayout*>(palette.actionPanel()->layout());
     require(layout != nullptr && layout->itemAt(layout->count() - 1)->widget() == select &&
                 select->accessibleName() == QStringLiteral("Recognition model"),
@@ -7493,7 +7499,7 @@ void recognitionModelSelectorGroupsOptionsAndRetainsIndependentSelections() {
                 !select->isHidden() && modelChanges == 2,
             "LaTeX must display the default server model's real identity without emitting a model "
             "choice");
-    requireCatalogOptions(QStringLiteral("LaTeX-Specific Model"));
+    requireCatalogOptions(QStringLiteral("LaTeX-specific model"));
     std::swap(latexState.models[1], latexState.models[2]);
     latexState.effectiveModel = QStringLiteral("vision-default");
     palette.setRecognitionModelState(Tool::Latex, latexState);
@@ -7552,7 +7558,7 @@ void recognitionModelSelectorGroupsOptionsAndRetainsIndependentSelections() {
     palette.setRecognitionModelState(Tool::Latex, latexState);
     const auto unavailableDefault = select->options();
     require(unavailableDefault.size() == 4 &&
-                unavailableDefault[0].label == QStringLiteral("LaTeX-Specific Model") &&
+                unavailableDefault[0].label == QStringLiteral("LaTeX-specific model") &&
                 unavailableDefault[1].value.toString() == QStringLiteral("custom:vision") &&
                 unavailableDefault[2].value.toString() == QStringLiteral("custom:vision-other") &&
                 unavailableDefault[3].value.toString() ==
@@ -7627,10 +7633,10 @@ void recognitionModelSelectorPreservesPopupStateAndScalesAndRetranslates() {
             "keyboard opening during model loading must show a usable popup inside screen bounds");
     input->selectAll();
     PhysicalKeyEvent search(QEvent::KeyPress, Qt::Key_unknown, Qt::NoModifier,
-                            QStringLiteral("Table-Specific Model"));
+                            QStringLiteral("Table-specific model"));
     QApplication::sendEvent(input, &search);
     QCoreApplication::processEvents();
-    require(select->searchText() == QStringLiteral("Table-Specific Model") &&
+    require(select->searchText() == QStringLiteral("Table-specific model") &&
                 view->model()->rowCount() == 2 && keyboardSelections == 0,
             "typing while model loading must filter grouped options without committing a model");
     PhysicalKeyEvent home(QEvent::KeyPress, Qt::Key_Home, Qt::NoModifier);
@@ -7680,9 +7686,9 @@ void recognitionModelSelectorPreservesPopupStateAndScalesAndRetranslates() {
     require(
         translated.size() == 3 &&
             select->accessibleName() == QStringLiteral("Translated Recognition model") &&
-            translated[0].label == QStringLiteral("Translated Table-Specific Model") &&
-            translated[0].group == QStringLiteral("Translated Dedicated Model") &&
-            translated[1].group == QStringLiteral("Translated Vision Model") &&
+            translated[0].label == QStringLiteral("Translated Table-specific model") &&
+            translated[0].group == QStringLiteral("Translated Dedicated model") &&
+            translated[1].group == QStringLiteral("Translated Vision model") &&
             translated[1].value.toString() == QStringLiteral("custom:vision") &&
             translated[1].label == longName && translated[2].group == translated[1].group &&
             translated[2].label == QStringLiteral("Translated Snow Shot visual understanding") &&
@@ -7693,9 +7699,9 @@ void recognitionModelSelectorPreservesPopupStateAndScalesAndRetranslates() {
     palette.setActiveTool(Tool::Latex);
     const auto translatedLatex = select->options();
     require(translatedLatex.size() == 3 &&
-                translatedLatex[0].label == QStringLiteral("Translated LaTeX-Specific Model") &&
-                translatedLatex[0].group == QStringLiteral("Translated Dedicated Model") &&
-                translatedLatex[1].group == QStringLiteral("Translated Vision Model") &&
+                translatedLatex[0].label == QStringLiteral("Translated LaTeX-specific model") &&
+                translatedLatex[0].group == QStringLiteral("Translated Dedicated model") &&
+                translatedLatex[1].group == QStringLiteral("Translated Vision model") &&
                 translatedLatex[1].label == longName &&
                 translatedLatex[1].value.toString() == QStringLiteral("custom:vision") &&
                 translatedLatex[2].group == translatedLatex[1].group &&
@@ -7714,8 +7720,8 @@ void recognitionModelSelectorPreservesPopupStateAndScalesAndRetranslates() {
     palette.setRecognitionModelState(Tool::Latex, defaultState);
     const auto translatedCatalog = select->options();
     require(translatedCatalog.size() == 3 &&
-                translatedCatalog[0].label == QStringLiteral("Translated LaTeX-Specific Model") &&
-                translatedCatalog[1].group == QStringLiteral("Translated Vision Model") &&
+                translatedCatalog[0].label == QStringLiteral("Translated LaTeX-specific model") &&
+                translatedCatalog[1].group == QStringLiteral("Translated Vision model") &&
                 translatedCatalog[1].value.toString() == QStringLiteral("server-vision") &&
                 translatedCatalog[1].label == QStringLiteral("Actual server vision name") &&
                 translatedCatalog[2].value.toString() == QStringLiteral("custom:vision") &&
@@ -7857,7 +7863,7 @@ void imageConversionToolsExposeRecognitionActions() {
             "HTML switches format and retains the conversion sub-toolbar");
     palette.setLatexState(true, false);
     reopenConversionOptions();
-    auto* latex = popoverButtonWithTooltip(popover, "LaTeX Formula Recognition");
+    auto* latex = popoverButtonWithTooltip(popover, "LaTeX formula recognition");
     int latexRequests = 0;
     QObject::connect(&palette, &ScreenshotToolPalette::latexRequested, &palette,
                      [&]() { ++latexRequests; });
@@ -8038,7 +8044,7 @@ void ocrToolReplacesSelectionActionToolbarContents() {
     const QVector<SnowShotChatModel> services{
         {QStringLiteral("model-a"), QStringLiteral("Model A")},
         {QStringLiteral("custom:test"), QStringLiteral("Custom AI model")},
-        {QStringLiteral("free-translation"), QStringLiteral("Free Translation"), false,
+        {QStringLiteral("free-translation"), QStringLiteral("Free translation"), false,
          QStringLiteral("free-translation")},
         {QStringLiteral("translation:test"), QStringLiteral("Custom service"), false,
          QStringLiteral("text")},
@@ -8142,10 +8148,10 @@ void ocrToolReplacesSelectionActionToolbarContents() {
             const auto& model = services.at(row);
             const QString label =
                 row == 2 ? QCoreApplication::translate("snow_shot::translation::TranslationService",
-                                                       "Free Translation")
+                                                       "Free translation")
                          : model.name;
             const QString group = QCoreApplication::translate(
-                "TranslationService", row < 2 ? "General Models" : "Translation Models");
+                "TranslationService", row < 2 ? "General models" : "Translation models");
             require(option.value == model.id && option.label == label && option.group == group,
                     "quick services preserve the shared catalog order, names and model groups");
         }
@@ -8246,9 +8252,9 @@ void recognitionToolsKeepDrawingToolsAvailable() {
     options.showShapeTool = true;
     options.showArrowTool = true;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showFilterTool = true;
     options.showEraserTool = true;
     options.showWatermarkTool = true;
@@ -8259,8 +8265,8 @@ void recognitionToolsKeepDrawingToolsAvailable() {
 
     ScreenshotToolPalette palette(options);
     const char* const drawingTools[] = {
-        "Select elements", "Shape",  "Arrow",  "Line",      "Pen", "Text",
-        "Serial number",   "Filter", "Eraser", "Watermark",
+        "Select elements", "Shape",  "Arrow",  "Line",      "Brush", "Text",
+        "Sequence number", "Filter", "Eraser", "Watermark",
     };
 
     palette.setActiveTool(ScreenshotToolPalette::Tool::Ocr);
@@ -8337,10 +8343,10 @@ void repeatingDrawingShortcutsReturnsToSelect() {
     options.showLineTool = true;
     options.showSpotlightTool = true;
     options.showMagnifierTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showHighlightTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showFilterTool = true;
     options.showEraserTool = true;
     options.showWatermarkTool = true;
@@ -8356,11 +8362,11 @@ void repeatingDrawingShortcutsReturnsToSelect() {
         {"spotlight", Tool::Spotlight},
         {"shape", Tool::Shape},
         {"arrow", Tool::Arrow},
-        {"brush", Tool::FreeDraw},
-        {"highlight", Tool::PenHighlight},
+        {"brush", Tool::Brush},
+        {"highlight", Tool::BrushHighlight},
         {"text", Tool::Text},
-        {"serial_number", Tool::SerialNumber},
-        {"filter", Tool::PenFilter},
+        {"serial_number", Tool::SequenceNumber},
+        {"filter", Tool::BrushFilter},
         {"eraser", Tool::Eraser},
         {"watermark", Tool::Watermark},
     };
@@ -8391,7 +8397,99 @@ void repeatingDrawingShortcutsReturnsToSelect() {
             "unknown shortcuts should leave the active tool unchanged");
 }
 
-void repeatingActionShortcutsReturnsToSelect() {
+void repeatedToolsReturnToTheirToolbarDefault() {
+    using Tool = ScreenshotToolPalette::Tool;
+    using Presentation = ScreenshotToolPalette::MoveToolPresentation;
+    struct ToolbarCase {
+        bool recording;
+        bool move;
+        Presentation presentation;
+    };
+    for (const auto& fixture : {ToolbarCase{false, true, Presentation::EditSelection},
+                                ToolbarCase{false, true, Presentation::ResizeWindow},
+                                ToolbarCase{true, false, Presentation::EditSelection},
+                                ToolbarCase{false, true, Presentation::Pan},
+                                ToolbarCase{false, false, Presentation::EditSelection}}) {
+        ScreenshotToolPalette::Options options;
+        options.showMoveTool = fixture.move;
+        options.moveToolPresentation = fixture.presentation;
+        options.showRecordingControls = fixture.recording;
+        options.recordingDrawingMode = fixture.recording;
+        options.showOcrTool = !fixture.recording;
+        options.enableStyleToolbar = false;
+        ScreenshotToolPalette palette(options);
+        const Tool defaultTool = fixture.move ? Tool::Move : Tool::Select;
+        const auto requireDefault = [&] {
+            require(fixture.recording ? !palette.activeTool().has_value() &&
+                                            palette.recordingExportSettingsVisible()
+                                      : palette.activeTool() == defaultTool,
+                    "repeated activation must restore the owning toolbar's default");
+        };
+        int moves = 0, selects = 0;
+        QObject::connect(&palette, &ScreenshotToolPalette::moveRequested, [&] { ++moves; });
+        QObject::connect(&palette, &ScreenshotToolPalette::selectRequested, [&] { ++selects; });
+        for (const auto& [tool, tooltip] :
+             {std::pair{Tool::Select, "Select elements"}, std::pair{Tool::Shape, "Shape"},
+              std::pair{Tool::Ocr, "Text recognition"}}) {
+            if (tool == Tool::Ocr && fixture.recording)
+                continue;
+            auto* button =
+                qobject_cast<adqt::widgets::AdButton*>(controlWithTooltip(palette, tooltip));
+            require(button != nullptr, "the tool toggle fixture must expose its command");
+            for (const bool shortcut : {false, true}) {
+                palette.clearActiveTool();
+                const auto activate = [&] {
+                    if (shortcut)
+                        require(palette.activateToolShortcut(tool), "tool shortcut must activate");
+                    else
+                        button->click();
+                };
+                activate();
+                require(palette.activeTool() == tool && !palette.recordingExportSettingsVisible(),
+                        "the first activation must select the requested tool");
+                const int previousMoves = moves, previousSelects = selects;
+                palette.setActiveTool(tool);
+                palette.setActiveTool(tool);
+                require(palette.activeTool() == tool && moves == previousMoves &&
+                            selects == previousSelects,
+                        "programmatic synchronization must not toggle or dispatch commands");
+                activate();
+                requireDefault();
+                require(moves == previousMoves + (defaultTool == Tool::Move ? 1 : 0) &&
+                            selects == previousSelects + (defaultTool == Tool::Move ? 0 : 1),
+                        "returning to the default must dispatch its existing command once");
+            }
+        }
+        if (fixture.recording) {
+            auto* settings = palette.findChild<adqt::widgets::AdButton*>(
+                QStringLiteral("screenRecordingExportSettings"));
+            require(settings != nullptr, "recording must expose Export settings");
+            settings->click();
+            settings->click();
+            requireDefault();
+        } else if (defaultTool == Tool::Move) {
+            require(palette.activateToolShortcut(Tool::Move),
+                    "Move shortcut must remain available");
+            requireDefault();
+            const char* tooltip = fixture.presentation == Presentation::Pan ? "Pan"
+                                  : fixture.presentation == Presentation::EditSelection
+                                      ? "Edit selection"
+                                      : "Resize window";
+            auto* move =
+                qobject_cast<adqt::widgets::AdButton*>(controlWithTooltip(palette, tooltip));
+            require(move != nullptr, "the toolbar must expose its default tool");
+            move->click();
+            requireDefault();
+        }
+        palette.setActiveTool(Tool::Shape);
+        auto* shape = qobject_cast<adqt::widgets::AdButton*>(controlWithTooltip(palette, "Shape"));
+        shape->setEnabled(false);
+        require(!palette.activateToolShortcut(Tool::Shape) && palette.activeTool() == Tool::Shape,
+                "a disabled active tool must not toggle through its shortcut");
+    }
+}
+
+void repeatingActionShortcutsReturnsToDefault() {
     using Tool = ScreenshotToolPalette::Tool;
     ScreenshotToolPalette::Options options;
     options.showMoveTool = true;
@@ -8402,21 +8500,20 @@ void repeatingActionShortcutsReturnsToSelect() {
     options.showScrollingScreenshotTool = true;
     options.enableStyleToolbar = false;
     ScreenshotToolPalette palette(options);
-    int selectRequests = 0;
-    QObject::connect(&palette, &ScreenshotToolPalette::selectRequested,
-                     [&selectRequests]() { ++selectRequests; });
+    int moveRequests = 0;
+    QObject::connect(&palette, &ScreenshotToolPalette::moveRequested,
+                     [&moveRequests]() { ++moveRequests; });
     for (const Tool tool : {Tool::Move, Tool::Ocr, Tool::TextTranslation, Tool::Table, Tool::Qr,
                             Tool::ScrollingScreenshot}) {
         palette.setActiveTool(Tool::Select);
         require(palette.activateToolShortcut(tool) && palette.activeToolForTests() == tool,
                 "an action shortcut should activate its tool");
-        const int previousSelectRequests = selectRequests;
-        require(palette.activateToolShortcut(tool) &&
-                    palette.activeToolForTests() == Tool::Select &&
-                    selectRequests == previousSelectRequests + 1,
-                "repeating an active action shortcut should request Select exactly once");
+        const int previousMoveRequests = moveRequests;
+        require(palette.activateToolShortcut(tool) && palette.activeToolForTests() == Tool::Move &&
+                    moveRequests == previousMoveRequests + 1,
+                "repeating an active action shortcut should request Move exactly once");
         palette.setActiveTool(tool);
-        require(palette.activateToolShortcut(tool) && palette.activeToolForTests() == Tool::Select,
+        require(palette.activateToolShortcut(tool) && palette.activeToolForTests() == Tool::Move,
                 "shortcuts should toggle tools activated through another input path");
     }
 }
@@ -8434,11 +8531,12 @@ void groupedToolShortcutsToggleOnlyTheRequestedTool() {
                 settings.setLastFilterTool(QStringLiteral("pen-filter")),
             "grouped shortcut tests must start from known remembered drawing modes");
     ScreenshotToolPalette::Options options;
+    options.showMoveTool = true;
     options.showLineTool = true;
     options.showHighlightTool = true;
     options.showSpotlightTool = true;
     options.showRectangleHighlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.showFilterTool = true;
     options.showWatermarkTool = true;
     options.enableStyleToolbar = false;
@@ -8454,12 +8552,12 @@ void groupedToolShortcutsToggleOnlyTheRequestedTool() {
                 palette.activeToolForTests() == Tool::Arrow,
             "a shortcut should activate a different tool even when it shares the active button");
     require(palette.activateDrawingShortcut(QStringLiteral("arrow")) &&
-                palette.activeToolForTests() == Tool::Select,
-            "repeating a grouped tool shortcut should return to Select");
+                palette.activeToolForTests() == Tool::Move,
+            "repeating a grouped tool shortcut should return to Edit selection");
 
     for (const auto& [id, sibling, tool] :
-         {std::tuple{"highlight", Tool::Spotlight, Tool::PenHighlight},
-          std::tuple{"filter", Tool::Watermark, Tool::PenFilter}}) {
+         {std::tuple{"highlight", Tool::Spotlight, Tool::BrushHighlight},
+          std::tuple{"filter", Tool::Watermark, Tool::BrushFilter}}) {
         palette.setActiveTool(sibling);
         require(palette.activateDrawingShortcut(QString::fromLatin1(id)) &&
                     palette.activeToolForTests() == tool,
@@ -8470,17 +8568,18 @@ void groupedToolShortcutsToggleOnlyTheRequestedTool() {
                                    std::pair{"filter", Tool::RectangleFilter}}) {
         palette.setActiveTool(tool);
         require(palette.activateDrawingShortcut(QString::fromLatin1(id)) &&
-                    palette.activeToolForTests() == Tool::Select,
+                    palette.activeToolForTests() == Tool::Move,
                 "shortcuts should toggle the active highlight or filter variant");
     }
 
     options.recordingDrawingMode = true;
+    options.showRecordingControls = true;
     ScreenshotToolPalette recordingPalette(options);
     require(recordingPalette.activateDrawingShortcut(QStringLiteral("shape")) &&
                 recordingPalette.activateDrawingShortcut(QStringLiteral("shape")) &&
-                recordingPalette.activeToolForTests() == Tool::Select &&
-                !recordingPalette.recordingExportSettingsVisible(),
-            "repeated recording shortcuts must return to Select");
+                !recordingPalette.activeToolForTests().has_value() &&
+                recordingPalette.recordingExportSettingsVisible(),
+            "repeated recording shortcuts must return to Export settings");
     recordingPalette.setActiveTool(Tool::Shape);
     recordingPalette.setActiveTool(Tool::Shape);
     require(recordingPalette.activeToolForTests() == Tool::Shape &&
@@ -8488,7 +8587,7 @@ void groupedToolShortcutsToggleOnlyTheRequestedTool() {
             "programmatic recording tool synchronization must remain idempotent");
     require(recordingPalette.activateDrawingShortcut(QStringLiteral("highlight")) &&
                 (recordingPalette.activeToolForTests() == Tool::RectangleHighlight ||
-                 recordingPalette.activeToolForTests() == Tool::PenHighlight),
+                 recordingPalette.activeToolForTests() == Tool::BrushHighlight),
             "recording highlight shortcuts should activate the canvas tool");
 }
 
@@ -8569,16 +8668,20 @@ void hiddenToolbarShortcutsPreserveToolsAndLayouts() {
         const auto expectedActions = settings.layout(actionKind);
         for (const bool initiallyHidden : {false, true}) {
             ScreenshotToolPalette::Options options;
-            options.showMoveTool = options.showLineTool = options.showFreeDrawTool = true;
+            options.showMoveTool = options.showLineTool = options.showBrushTool = true;
             options.showHighlightTool = options.showSpotlightTool = options.showEraserTool = true;
             options.showFilterTool = options.showWatermarkTool = options.showTextTool = true;
-            options.showSerialNumberTool = options.showOcrTool = options.showTextTranslationTool =
+            options.showSequenceNumberTool = options.showOcrTool = options.showTextTranslationTool =
                 true;
             options.showTableTool = options.showQrTool = options.showScrollingScreenshotTool = true;
             options.showScreenRecordButton = options.showSaveButton = options.showHistoryActions =
                 true;
-            options.actions = ScreenshotToolPalette::PinAction | ScreenshotToolPalette::CopyAction |
-                              ScreenshotToolPalette::CancelAction;
+            options.actions =
+                ScreenshotToolPalette::CopyAction | ScreenshotToolPalette::CancelAction;
+            // A Pin action with the pinned layout belongs to Image Editing and is fixed.
+            // The actual pinned toolbar does not expose that action.
+            if (actionKind == ScreenshotToolbarLayoutKind::ActionTools)
+                options.actions |= ScreenshotToolPalette::PinAction;
             options.actionToolsLayoutKind = actionKind;
             options.toolbarLayout = initiallyHidden ? hiddenDrawing : layout::normalizedLayout({});
             options.actionToolsLayout =
@@ -8606,11 +8709,11 @@ void hiddenToolbarShortcutsPreserveToolsAndLayouts() {
             const DrawingCommand drawingCommands[] = {
                 {"shape", Tool::Shape, &ScreenshotToolPalette::shapeRequested},
                 {"arrow", Tool::Arrow, &ScreenshotToolPalette::arrowRequested},
-                {"brush", Tool::FreeDraw, &ScreenshotToolPalette::freeDrawRequested},
+                {"brush", Tool::Brush, &ScreenshotToolPalette::brushRequested},
                 {"highlight", Tool::RectangleHighlight, &ScreenshotToolPalette::highlightRequested},
                 {"text", Tool::Text, &ScreenshotToolPalette::textRequested},
-                {"serial_number", Tool::SerialNumber,
-                 &ScreenshotToolPalette::serialNumberRequested},
+                {"serial_number", Tool::SequenceNumber,
+                 &ScreenshotToolPalette::sequenceNumberRequested},
                 {"filter", Tool::AutoFilter, &ScreenshotToolPalette::autoFilterRequested},
                 {"eraser", Tool::BrushEraser, &ScreenshotToolPalette::brushEraserRequested},
                 {"watermark", Tool::Watermark, &ScreenshotToolPalette::watermarkRequested},
@@ -8628,8 +8731,8 @@ void hiddenToolbarShortcutsPreserveToolsAndLayouts() {
                     "each hidden drawing hotkey activates its remembered tool once with settings");
                 verifyHidden();
                 require(palette.activateDrawingShortcut(id) && requests == 1 &&
-                            palette.activeTool() == Tool::Select,
-                        "each hidden drawing hotkey retains toggle-to-Select behavior");
+                            palette.activeTool() == Tool::Move,
+                        "each hidden drawing hotkey returns to the default Move tool");
                 QObject::disconnect(connection);
             }
             struct ActionCommand {
@@ -8653,6 +8756,9 @@ void hiddenToolbarShortcutsPreserveToolsAndLayouts() {
                 {"redo", &ScreenshotToolPalette::redoRequested},
             };
             for (const auto& command : actionCommands) {
+                if (actionKind == ScreenshotToolbarLayoutKind::PinnedActionTools &&
+                    QLatin1String(command.id) == QLatin1String("pin_to_screen"))
+                    continue;
                 palette.setActiveTool(Tool::Select);
                 palette.setHistoryState({true, true});
                 int requests = 0;
@@ -9101,10 +9207,10 @@ void pressureBrushToolbarPreservesStylesAndMixedSelection() {
     using Tool = ScreenshotToolPalette::Tool;
     ScreenshotToolPalette::Options options;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.styleDefaults.freeDraw.brushMode = SnowCanvasBrushMode::PressureSensitive;
     ScreenshotToolPalette palette(options);
-    palette.setActiveTool(Tool::FreeDraw);
+    palette.setActiveTool(Tool::Brush);
     const auto group = [&palette]() {
         auto* root = palette.findChild<QWidget*>(QStringLiteral("screenshotBrushModeButtonGroup"));
         return root == nullptr ? nullptr : root->findChild<adqt::widgets::AdRadioButtonGroup*>();
@@ -9141,7 +9247,7 @@ void pressureBrushToolbarPreservesStylesAndMixedSelection() {
             "Regular brush must update independent creation defaults without altering appearance");
     palette.setActiveTool(Tool::Line);
     require(group() == nullptr, "Line must not expose brush-specific options");
-    palette.setActiveTool(Tool::FreeDraw);
+    palette.setActiveTool(Tool::Brush);
     brushGroup = group();
     require(brushGroup != nullptr && brushGroup->checkedId() == 0,
             "Brush mode must survive style editor recreation");
@@ -9173,7 +9279,7 @@ void pressureBrushToolbarPreservesStylesAndMixedSelection() {
         const char* pressure;
     } translations[] = {{"en_US", "Regular brush", "Pressure-sensitive brush"},
                         {"zh_CN", "普通画笔", "压感画笔"},
-                        {"zh_TW", "一般筆刷", "壓感筆刷"}};
+                        {"zh_TW", "一般畫筆", "壓感畫筆"}};
     for (const auto& translation : translations) {
         require(language.setLanguage(QString::fromLatin1(translation.locale)),
                 "brush translation catalog must load");
@@ -9209,7 +9315,7 @@ void pressureBrushPreferencePersistsAndRejectsUnknownValues() {
     QObject::connect(&canvas, &SnowCanvasWidget::styleToolbarStateChanged, &palette,
                      [&] { palette.setStyleToolbarState(canvas.canvasStyleToolbarState()); });
     require(canvas.setCanvasTool(SnowCanvasTool::FreeDraw), "activate brush creation preferences");
-    palette.setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::Brush);
     auto* root = palette.findChild<QWidget*>(QStringLiteral("screenshotBrushModeButtonGroup"));
     auto* brushGroup =
         root == nullptr ? nullptr : root->findChild<adqt::widgets::AdRadioButtonGroup*>();
@@ -9260,7 +9366,7 @@ void pressureBrushPreferencePersistsAndRejectsUnknownValues() {
             "older preferences without Brush mode must retain Regular behavior");
 }
 
-void freeDrawToolIsDistinctAndUsesIndependentPathStyleControls() {
+void brushToolIsDistinctAndUsesIndependentPathStyleControls() {
     ScreenshotToolPalette::Options options;
     options.showShapeTool = false;
     options.showArrowTool = false;
@@ -9268,16 +9374,16 @@ void freeDrawToolIsDistinctAndUsesIndependentPathStyleControls() {
     options.showAngleTool = false;
     options.showBracketTool = false;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     ScreenshotToolPalette palette(options);
 
-    auto* freeDrawButton =
-        qobject_cast<adqt::widgets::AdButton*>(controlWithTooltip(palette, "Pen"));
-    require(freeDrawButton != nullptr, "Free Draw toolbar control should be present");
+    auto* brushButton =
+        qobject_cast<adqt::widgets::AdButton*>(controlWithTooltip(palette, "Brush"));
+    require(brushButton != nullptr, "Free Draw toolbar control should be present");
     int requestCount = 0;
-    QObject::connect(&palette, &ScreenshotToolPalette::freeDrawRequested,
+    QObject::connect(&palette, &ScreenshotToolPalette::brushRequested,
                      [&requestCount]() { ++requestCount; });
-    freeDrawButton->click();
+    brushButton->click();
     require(requestCount == 1, "clicking Free Draw should emit one tool request");
     require(palette.findChild<QWidget*>(QStringLiteral("screenshotFreeDrawStyleControls")) !=
                 nullptr,
@@ -9288,17 +9394,17 @@ void freeDrawToolIsDistinctAndUsesIndependentPathStyleControls() {
     require(controlWithTooltip(palette, "Corner radius (scroll to adjust)") == nullptr,
             "Free Draw should not materialize Rectangle-only corner radius");
 
-    int freeDrawPatchCount = 0;
+    int brushPatchCount = 0;
     observePaletteStyleEdit<SnowCanvasShapeEdit>(
-        palette, [&freeDrawPatchCount](const SnowCanvasShapeStyle&, quint32 properties,
-                                       SnowCanvasShapeKind kind) {
+        palette, [&brushPatchCount](const SnowCanvasShapeStyle&, quint32 properties,
+                                    SnowCanvasShapeKind kind) {
             if (kind == SnowCanvasShapeKind::FreeDraw &&
                 properties == SnowCanvasShapeStylePropertyStrokeWidth) {
-                ++freeDrawPatchCount;
+                ++brushPatchCount;
             }
         });
     clickStyleControl(palette, "Stroke width 4");
-    require(freeDrawPatchCount == 1, "Free Draw style edits should use its own shape kind");
+    require(brushPatchCount == 1, "Free Draw style edits should use its own shape kind");
 
     SnowCanvasWidget canvas;
     require(canvas.setCanvasTool(SnowCanvasTool::FreeDraw), "canvas should accept Free Draw");
@@ -9314,9 +9420,9 @@ void highlightVariantsUseConfiguredPopoverGroup() {
     options.showDistanceTool = false;
     options.showAngleTool = false;
     options.showBracketTool = false;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showHighlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.showSpotlightTool = true;
     ScreenshotToolPalette palette(options);
 
@@ -9328,14 +9434,14 @@ void highlightVariantsUseConfiguredPopoverGroup() {
     materializeLazyPopover(trigger);
     QWidget* content = popover != nullptr ? popover->contentWidget() : nullptr;
     auto* highlighterOption = popoverButtonWithTooltip(popover, "Highlight");
-    auto* penHighlightOption = popoverButtonWithTooltip(popover, "Pen highlight");
+    auto* brushHighlightOption = popoverButtonWithTooltip(popover, "Brush highlight");
     auto* rectangleHighlightOption = popoverButtonWithTooltip(popover, "Rectangle highlight");
     auto* spotlightOption = popoverButtonWithTooltip(popover, "Spotlight");
     require(trigger != nullptr && trigger->accessibleName() == QStringLiteral("Highlight") &&
                 popover != nullptr && content != nullptr &&
                 content->objectName() == QStringLiteral("screenshotHighlightPopoverContent") &&
                 qobject_cast<QHBoxLayout*>(content->layout()) != nullptr &&
-                highlighterOption != nullptr && penHighlightOption == nullptr &&
+                highlighterOption != nullptr && brushHighlightOption == nullptr &&
                 rectangleHighlightOption == nullptr && spotlightOption != nullptr &&
                 palette.findChild<adqt::widgets::AdButton*>(
                     QStringLiteral("screenshotRectangleHighlightButton")) == nullptr &&
@@ -9343,7 +9449,7 @@ void highlightVariantsUseConfiguredPopoverGroup() {
                     content->layout()->indexOf(spotlightOption),
             "the live toolbar should expose one generic Highlight alongside Spotlight");
 
-    palette.setActiveTool(ScreenshotToolPalette::Tool::PenHighlight);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::BrushHighlight);
     const QList<QWidget*> highlightModeSelectors =
         palette.findChildren<QWidget*>(QStringLiteral("screenshotHighlightModeSelector"));
     require(highlightModeSelectors.size() == 1,
@@ -9355,15 +9461,15 @@ void highlightVariantsUseConfiguredPopoverGroup() {
         require(group != nullptr && group->buttons().size() == 2,
                 "highlight style mode selectors should contain only rectangle and pen");
         const QStringList expectedModes{
-            QStringLiteral("Pen highlight"),
+            QStringLiteral("Brush highlight"),
             QStringLiteral("Rectangle highlight"),
         };
         for (int index = 0; index < expectedModes.size(); ++index) {
             require(group->buttons().at(index)->toolTip() == expectedModes.at(index),
                     "highlight style mode selectors should place the default pen mode first");
         }
-        require(group->checkedId() == static_cast<int>(ScreenshotToolPalette::Tool::PenHighlight),
-                "highlight style mode selectors should default to Pen highlight");
+        require(group->checkedId() == static_cast<int>(ScreenshotToolPalette::Tool::BrushHighlight),
+                "highlight style mode selectors should default to Brush highlight");
     }
     QWidget* spotlightControls =
         palette.findChild<QWidget*>(QStringLiteral("screenshotSpotlightStyleControls"));
@@ -9371,9 +9477,9 @@ void highlightVariantsUseConfiguredPopoverGroup() {
                                                 "screenshotHighlightModeSelector")) == nullptr,
             "Spotlight should remain deferred or exclude the rectangle and pen style selector");
 
-    QWidget* freeDrawButton = controlWithTooltip(palette, "Pen");
-    require(freeDrawButton != nullptr && freeDrawButton->mapTo(palette.mainPanel(), QPoint()).y() ==
-                                             trigger->mapTo(palette.mainPanel(), QPoint()).y(),
+    QWidget* brushButton = controlWithTooltip(palette, "Brush");
+    require(brushButton != nullptr && brushButton->mapTo(palette.mainPanel(), QPoint()).y() ==
+                                          trigger->mapTo(palette.mainPanel(), QPoint()).y(),
             "the highlight group trigger should remain in the single main toolbar row");
 
     int rectangleRequests = 0;
@@ -9381,7 +9487,7 @@ void highlightVariantsUseConfiguredPopoverGroup() {
     int spotlightRequests = 0;
     QObject::connect(&palette, &ScreenshotToolPalette::highlightRequested,
                      [&rectangleRequests]() { ++rectangleRequests; });
-    QObject::connect(&palette, &ScreenshotToolPalette::penHighlightRequested,
+    QObject::connect(&palette, &ScreenshotToolPalette::brushHighlightRequested,
                      [&penRequests]() { ++penRequests; });
     QObject::connect(&palette, &ScreenshotToolPalette::spotlightRequested,
                      [&spotlightRequests]() { ++spotlightRequests; });
@@ -9455,7 +9561,7 @@ void highlightVariantsUseConfiguredPopoverGroup() {
     spotlightOption = popoverButtonWithTooltip(popover, "Spotlight");
     require(highlighterOption != nullptr && spotlightOption != nullptr,
             "the active highlight group should recreate options before state synchronization");
-    palette.setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::Brush);
     require(trigger->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Text &&
                 highlighterOption->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Text &&
                 spotlightOption->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Text,
@@ -9484,7 +9590,7 @@ void highlightStyleToolbarWidthTracksActiveMode() {
     require(palette.stylePanel()->size() == rectangleSize,
             "rectangle highlight should size the style toolbar to its controls");
 
-    palette.setActiveTool(ScreenshotToolPalette::Tool::PenHighlight);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::BrushHighlight);
     QCoreApplication::processEvents();
     const QSize penSize = expectedPanelSize("screenshotPenHighlightStyleControls");
     require(palette.stylePanel()->size() == penSize,
@@ -9626,7 +9732,7 @@ void eraserToolsExposeRememberedModesAndIndependentWidth() {
     QWidget* brushRow =
         palette.findChild<QWidget*>(QStringLiteral("screenshotBrushEraserStyleControls"));
     QWidget* widthRoot = styleEditorRoot(brushRow, "brush-width");
-    palette.setActiveTool(Tool::PenFilter);
+    palette.setActiveTool(Tool::BrushFilter);
     QWidget* penRow =
         palette.findChild<QWidget*>(QStringLiteral("screenshotPenFilterStyleControls"));
     require(widthRoot != nullptr && widthRoot == styleEditorRoot(penRow, "brush-width") &&
@@ -9640,7 +9746,7 @@ void eraserToolsExposeRememberedModesAndIndependentWidth() {
             "rejected brush style commits leave creation preferences unchanged");
 }
 
-void recordingEraserActivationReturnsToSelect() {
+void recordingEraserActivationReturnsToExportSettings() {
     using Tool = ScreenshotToolPalette::Tool;
     const snow_shot::storage::ScreenshotToolbarSettings settings;
     const QString originalMode = settings.lastEraserTool();
@@ -9673,19 +9779,19 @@ void recordingEraserActivationReturnsToSelect() {
                 "recording secondary mode activation persists its variant");
         int previousSelectRequests = selectRequests;
         button->click();
-        require(palette.activeTool() == Tool::Select && !palette.recordingExportSettingsVisible() &&
-                    selectRequests == previousSelectRequests + 1 &&
-                    settings.lastEraserTool() == setting,
-                "repeated recording eraser click requests Select while preserving its mode");
+        require(
+            !palette.activeTool().has_value() && palette.recordingExportSettingsVisible() &&
+                selectRequests == previousSelectRequests + 1 &&
+                settings.lastEraserTool() == setting,
+            "repeated recording eraser click restores Export settings while preserving its mode");
         button->click();
         require(palette.activeTool() == tool, "recording eraser click restores its last mode");
         previousSelectRequests = selectRequests;
         require(palette.activateDrawingShortcut(QStringLiteral("eraser")) &&
-                    palette.activeTool() == Tool::Select &&
-                    !palette.recordingExportSettingsVisible() &&
+                    !palette.activeTool().has_value() && palette.recordingExportSettingsVisible() &&
                     selectRequests == previousSelectRequests + 1 &&
                     settings.lastEraserTool() == setting,
-                "repeated recording eraser shortcut shares the Select toggle contract");
+                "repeated recording eraser shortcut restores Export settings");
         require(palette.activateDrawingShortcut(QStringLiteral("eraser")) &&
                     palette.activeTool() == tool,
                 "recording eraser shortcut restores its last mode");
@@ -9722,10 +9828,10 @@ void drawingModeSelectionsSurviveToolbarReentry() {
         require(false, "drawing mode selector should exist");
     };
     for (bool rectangle : {true, false}) {
-        const Tool highlightMode = rectangle ? Tool::RectangleHighlight : Tool::PenHighlight;
-        const Tool filterMode = rectangle ? Tool::PenFilter : Tool::RectangleFilter;
-        selectMode(rectangle ? Tool::PenHighlight : Tool::RectangleHighlight, highlightMode);
-        selectMode(rectangle ? Tool::RectangleFilter : Tool::PenFilter, filterMode);
+        const Tool highlightMode = rectangle ? Tool::RectangleHighlight : Tool::BrushHighlight;
+        const Tool filterMode = rectangle ? Tool::BrushFilter : Tool::RectangleFilter;
+        selectMode(rectangle ? Tool::BrushHighlight : Tool::RectangleHighlight, highlightMode);
+        selectMode(rectangle ? Tool::RectangleFilter : Tool::BrushFilter, filterMode);
         palette.setActiveTool(Tool::Select);
         highlight->click();
         require(palette.activeToolForTests() == highlightMode,
@@ -9781,8 +9887,8 @@ void rememberedDrawingModesPersistAcrossPaletteInstances() {
             }
             require(false, "drawing mode selector should exist");
         };
-        selectMode(Tool::PenFilter, Tool::RectangleFilter);
-        selectMode(Tool::PenHighlight, Tool::RectangleHighlight);
+        selectMode(Tool::BrushFilter, Tool::RectangleFilter);
+        selectMode(Tool::BrushHighlight, Tool::RectangleHighlight);
         require(toolbarSettings.lastFilterTool() == QStringLiteral("rectangle-filter") &&
                     toolbarSettings.lastHighlightTool() == QStringLiteral("rectangle-highlight"),
                 "activating a drawing mode should persist it as a toolbar preference");
@@ -9910,34 +10016,34 @@ void filterToolExposesTypeAndIntensityControls() {
     auto* filterButton =
         qobject_cast<adqt::widgets::AdButton*>(controlWithTooltip(palette, "Filter"));
     require(filterButton != nullptr, "Filter toolbar control should be present");
-    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::PenFilter),
+    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::BrushFilter),
             "Filter style rows should materialize on demand");
     const int rectangleFilterId = static_cast<int>(ScreenshotToolPalette::Tool::RectangleFilter);
-    const int penFilterId = static_cast<int>(ScreenshotToolPalette::Tool::PenFilter);
+    const int brushFilterId = static_cast<int>(ScreenshotToolPalette::Tool::BrushFilter);
     QList<adqt::widgets::AdRadioButtonGroup*> initialFilterModeGroups;
     for (adqt::widgets::AdRadioButtonGroup* group :
          palette.findChildren<adqt::widgets::AdRadioButtonGroup*>()) {
         if (group != nullptr && group->button(rectangleFilterId) != nullptr &&
-            group->button(penFilterId) != nullptr) {
+            group->button(brushFilterId) != nullptr) {
             initialFilterModeGroups.append(group);
         }
     }
     require(initialFilterModeGroups.size() == 1,
             "Pen Filter should materialize exactly one mode selector");
     for (adqt::widgets::AdRadioButtonGroup* group : initialFilterModeGroups) {
-        require(group->buttons().at(0) == group->button(penFilterId) &&
+        require(group->buttons().at(0) == group->button(brushFilterId) &&
                     group->buttons().at(1) == group->button(rectangleFilterId),
                 "Filter mode selectors should place Pen Filter before Rectangle Filter");
-        require(group->checkedId() == penFilterId,
+        require(group->checkedId() == brushFilterId,
                 "Filter mode selectors should default to Pen Filter");
     }
 
     int requestCount = 0;
-    QObject::connect(&palette, &ScreenshotToolPalette::penFilterRequested,
+    QObject::connect(&palette, &ScreenshotToolPalette::brushFilterRequested,
                      [&requestCount]() { ++requestCount; });
     filterButton->click();
     require(requestCount == 1 &&
-                palette.activeToolForTests() == ScreenshotToolPalette::Tool::PenFilter,
+                palette.activeToolForTests() == ScreenshotToolPalette::Tool::BrushFilter,
             "clicking Filter should request and activate Pen Filter");
 
     auto* typeSelect = palette.findChild<adqt::widgets::AdSelect*>(
@@ -9963,7 +10069,7 @@ void filterToolExposesTypeAndIntensityControls() {
     const FilterTypeRow filterTypeRows[] = {
         {0, SnowCanvasFilterType::Mosaic, QStringLiteral("Mosaic")},
         {1, SnowCanvasFilterType::GaussianBlur, QStringLiteral("Gaussian blur")},
-        {2, SnowCanvasFilterType::SmartErase, QStringLiteral("Smart Erase")},
+        {2, SnowCanvasFilterType::SmartErase, QStringLiteral("Smart erase")},
         {3, SnowCanvasFilterType::Grayscale, QStringLiteral("Grayscale")},
         {4, SnowCanvasFilterType::Inversion, QStringLiteral("Inversion")},
         {5, SnowCanvasFilterType::Emboss, QStringLiteral("Emboss")},
@@ -10029,23 +10135,23 @@ void filterToolExposesTypeAndIntensityControls() {
     for (adqt::widgets::AdRadioButtonGroup* group :
          palette.findChildren<adqt::widgets::AdRadioButtonGroup*>()) {
         if (group != nullptr && group->button(rectangleFilterId) != nullptr &&
-            group->button(penFilterId) != nullptr) {
+            group->button(brushFilterId) != nullptr) {
             filterModeGroups.append(group);
         }
     }
     require(filterModeGroups.size() == 1,
             "Filter should expose one mode selector in its active style row");
-    int penFilterRequests = requestCount;
+    int brushFilterRequests = requestCount;
     int rectangleFilterRequests = 0;
-    QObject::connect(&palette, &ScreenshotToolPalette::penFilterRequested,
-                     [&penFilterRequests]() { ++penFilterRequests; });
+    QObject::connect(&palette, &ScreenshotToolPalette::brushFilterRequested,
+                     [&brushFilterRequests]() { ++brushFilterRequests; });
     QObject::connect(&palette, &ScreenshotToolPalette::rectangleFilterRequested,
                      [&rectangleFilterRequests]() { ++rectangleFilterRequests; });
-    filterModeGroups.first()->button(penFilterId)->click();
-    require(penFilterRequests == 2 &&
-                palette.activeToolForTests() == ScreenshotToolPalette::Tool::PenFilter,
+    filterModeGroups.first()->button(brushFilterId)->click();
+    require(brushFilterRequests == 2 &&
+                palette.activeToolForTests() == ScreenshotToolPalette::Tool::BrushFilter,
             "the Pen Filter mode selector should request and activate Pen Filter");
-    require(filterModeGroups.constFirst()->checkedId() == penFilterId,
+    require(filterModeGroups.constFirst()->checkedId() == brushFilterId,
             "the Filter mode selector should follow Pen Filter activation");
 
     auto* rectangleControls =
@@ -10067,10 +10173,10 @@ void filterToolExposesTypeAndIntensityControls() {
     require(penTypeSelect != nullptr && penIntensity != nullptr && widthSummary != nullptr &&
                 width54 != nullptr,
             "Pen Filter should expose type, width presets, width summary, and intensity");
-    require(controlWithTooltip(palette, "Pen filter width S (24px)") != nullptr &&
-                controlWithTooltip(palette, "Pen filter width M (30px)") != nullptr &&
-                controlWithTooltip(palette, "Pen filter width L (42px)") != nullptr &&
-                controlWithTooltip(palette, "Pen filter width XL (54px)") != nullptr,
+    require(controlWithTooltip(palette, "Brush filter width S (24px)") != nullptr &&
+                controlWithTooltip(palette, "Brush filter width M (30px)") != nullptr &&
+                controlWithTooltip(palette, "Brush filter width L (42px)") != nullptr &&
+                controlWithTooltip(palette, "Brush filter width XL (54px)") != nullptr,
             "Pen Filter should use the same numeric stroke-width presets as Pen Highlight");
 
     SnowCanvasFilterStyle lastStyle;
@@ -10142,7 +10248,7 @@ void filterStyleEditorsMatchShapeAndSpotlightMetrics() {
     options.showFilterTool = true;
     options.showSpotlightTool = true;
     ScreenshotToolPalette palette(options);
-    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::PenFilter) &&
+    require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::BrushFilter) &&
                 palette.ensureStyleFamily(ScreenshotToolPalette::Tool::Spotlight),
             "Filter and Spotlight editors should materialize on demand");
 
@@ -10190,26 +10296,26 @@ void filterStyleEditorsMatchShapeAndSpotlightMetrics() {
         const CompactSliderSnapshot filter = compactSliderSnapshot(
             ScreenshotToolPalette::Tool::Filter, QStringLiteral("screenshotFilterIntensityIcon"),
             QStringLiteral("screenshotFilterIntensitySlider"));
-        const CompactSliderSnapshot penFilter =
-            compactSliderSnapshot(ScreenshotToolPalette::Tool::PenFilter,
+        const CompactSliderSnapshot brushFilter =
+            compactSliderSnapshot(ScreenshotToolPalette::Tool::BrushFilter,
                                   QStringLiteral("screenshotPenFilterIntensityIcon"),
                                   QStringLiteral("screenshotPenFilterIntensitySlider"));
         const CompactSliderSnapshot spotlight =
             compactSliderSnapshot(ScreenshotToolPalette::Tool::Spotlight,
                                   QStringLiteral("screenshotSpotlightOpacityIcon"),
                                   QStringLiteral("screenshotSpotlightOpacitySlider"));
-        require(filter.panelHeight == shapeHeight && penFilter.panelHeight == shapeHeight &&
+        require(filter.panelHeight == shapeHeight && brushFilter.panelHeight == shapeHeight &&
                     spotlight.panelHeight == shapeHeight,
                 "Filter style toolbar heights should match Shape and Spotlight");
-        require(filter.iconSize == spotlight.iconSize && penFilter.iconSize == filter.iconSize &&
+        require(filter.iconSize == spotlight.iconSize && brushFilter.iconSize == filter.iconSize &&
                     filter.sliderSize == spotlight.sliderSize &&
-                    penFilter.sliderSize == filter.sliderSize,
+                    brushFilter.sliderSize == filter.sliderSize,
                 "Filter intensity editors should use the compact slider metrics");
 
         require(!filter.pixmap.isNull() && pixmapHasVisiblePixel(filter.pixmap),
                 "Filter intensity icon should contain visible pixels");
-        require(!penFilter.pixmap.isNull() && pixmapHasVisiblePixel(penFilter.pixmap) &&
-                    penFilter.pixmap.toImage() == filter.pixmap.toImage(),
+        require(!brushFilter.pixmap.isNull() && pixmapHasVisiblePixel(brushFilter.pixmap) &&
+                    brushFilter.pixmap.toImage() == filter.pixmap.toImage(),
                 "Pen Filter should render the same visible Blur glyph as Filter");
         require(filter.pixmap.toImage() != spotlight.pixmap.toImage(),
                 "Filter should preserve its Blur glyph while sharing Spotlight metrics");
@@ -10224,7 +10330,7 @@ void drawingToolbarGroupsUseToolbarPopoverMetrics() {
     options.showArrowTool = true;
     options.showLineTool = true;
     options.showHighlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.showSpotlightTool = true;
     options.enableStyleToolbar = false;
     ScreenshotToolPalette palette(options);
@@ -11297,7 +11403,7 @@ void drawTemplateSelectSavesFiltersInsertsAndDeletes() {
     auto* layout =
         select == nullptr ? nullptr : qobject_cast<QBoxLayout*>(select->parentWidget()->layout());
     require(select != nullptr && opacity != nullptr && layout != nullptr &&
-                select->placeholder() == QStringLiteral("Annotation Template") &&
+                select->placeholder() == QStringLiteral("Annotation template") &&
                 select->searchEnabled() && select->isEnabled() &&
                 layout->indexOf(select) < layout->indexOf(opacity),
             "Draw Template should be an enabled searchable select left of opacity");
@@ -11330,7 +11436,7 @@ void drawTemplateSelectSavesFiltersInsertsAndDeletes() {
     QCoreApplication::processEvents();
     add = select->view()->window()->findChild<adqt::widgets::AdButton*>(
         QStringLiteral("screenshotDrawTemplateAddButton"));
-    require(add != nullptr && add->isVisible() && add->text() == QStringLiteral("Add Template") &&
+    require(add != nullptr && add->isVisible() && add->text() == QStringLiteral("Add template") &&
                 add->accentRole() == adqt::widgets::AdButton::AccentRole::Primary,
             "an empty Draw Template popup should retain its Add Template footer");
     auto& language = snow_shot::presentation::LanguageManager::instance();
@@ -11838,7 +11944,7 @@ void spotlightCornerRadiusEditorReusesShapeBehavior() {
 void shapeSelectorIsExclusiveToTheShapeTool() {
     ScreenshotToolPalette::Options options;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     ScreenshotToolPalette palette(options);
     palette.setActiveTool(ScreenshotToolPalette::Tool::Shape);
 
@@ -11854,7 +11960,7 @@ void shapeSelectorIsExclusiveToTheShapeTool() {
     require(shapeGroup.isNull() && shapeSeparator.isNull(),
             "Line should destroy Shape-only controls and their separator");
 
-    palette.setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::Brush);
     require(palette.findChild<QWidget*>(QStringLiteral("screenshotShapeButtonGroup")) == nullptr,
             "Free Draw should not materialize the Shape selector");
 
@@ -12206,7 +12312,7 @@ void lineStyleControlsExposeStraightAndCurveTypes() {
                 emittedProperties == SnowCanvasShapeStylePropertyArrowType,
             "choosing a Line type should resolve only the mixed type property");
 
-    palette.setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::Brush);
     require(palette.findChild<QWidget*>(QStringLiteral("screenshotLineTypeButtonGroup")) == nullptr,
             "Free Draw should not expose the Line type editor");
 }
@@ -12295,7 +12401,7 @@ void magnifierControlsPatchIndependentProperties() {
     ScreenshotToolPalette::Options options;
     options.showMagnifierTool = true;
     options.showSpotlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.styleDefaults = snow_shot::presentation::screenshotCanvasStyleDefaults();
     options.styleDefaults.rectangle.stroke = QColor(QStringLiteral("#1677ff"));
     options.styleDefaults.rectangle.strokeWidth = 9;
@@ -12975,7 +13081,7 @@ void magnifierControlsRetranslateAndRenderPreviews() {
     ScreenshotToolPalette::Options options;
     options.showMagnifierTool = true;
     options.showSpotlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     ScreenshotToolPalette palette(options);
     palette.setActiveTool(ScreenshotToolPalette::Tool::Magnifier);
 #if defined(Q_OS_WIN)
@@ -14502,7 +14608,7 @@ void selectedArrowMixedPropertiesResolveIndependently() {
 void styleToolbarWidthTracksTheActiveTool() {
     ScreenshotToolPalette::Options options;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     ScreenshotToolPalette palette(options);
 
     const auto expectedPanelSize = [&palette](const char* objectName) {
@@ -14524,7 +14630,7 @@ void styleToolbarWidthTracksTheActiveTool() {
         {ScreenshotToolPalette::Tool::Shape, "screenshotRectangleStyleControls"},
         {ScreenshotToolPalette::Tool::Arrow, "screenshotArrowStyleControls"},
         {ScreenshotToolPalette::Tool::Text, "screenshotTextStyleControls"},
-        {ScreenshotToolPalette::Tool::SerialNumber, "screenshotSerialNumberStyleControls"},
+        {ScreenshotToolPalette::Tool::SequenceNumber, "screenshotSerialNumberStyleControls"},
         {ScreenshotToolPalette::Tool::Arrow, "screenshotArrowStyleControls"},
     };
 
@@ -15238,10 +15344,10 @@ void retainedEditorsApplyDestinationMixedStateDuringReconciliation() {
                            "the retained stroke-style editor should apply destination mixed state");
 }
 
-void serialNumberCreationValuesAreIndependentPerNumericType() {
+void sequenceNumberCreationValuesAreIndependentPerNumericType() {
     using Numeric = SnowCanvasSerialNumberNumericType;
     ScreenshotToolPalette::Options options;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.styleDefaults = snow_shot::presentation::screenshotCanvasStyleDefaults();
     ScreenshotToolPalette palette(options);
     SnowCanvasRuntime runtime;
@@ -15254,7 +15360,7 @@ void serialNumberCreationValuesAreIndependentPerNumericType() {
     QObject::connect(&canvas, &SnowCanvasWidget::styleToolbarStateChanged, &palette,
                      [&] { palette.setStyleToolbarState(canvas.canvasStyleToolbarState()); });
     require(canvas.setCanvasTool(SnowCanvasTool::SerialNumber), "activate sequence creation");
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     palette.setStyleToolbarState(canvas.canvasStyleToolbarState());
     canvas.show();
     palette.show();
@@ -15296,13 +15402,13 @@ void serialNumberCreationValuesAreIndependentPerNumericType() {
     }
 }
 
-void serialNumberNumericTypeEditorPreservesValuesAndRetranslates() {
+void sequenceNumberNumericTypeEditorPreservesValuesAndRetranslates() {
     using Numeric = SnowCanvasSerialNumberNumericType;
     ScreenshotToolPalette::Options options;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showTextTool = true;
     ScreenshotToolPalette palette(options);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     SnowCanvasStyleToolbarState state;
     state.source = SnowCanvasStyleToolbarSource::SelectedSerialNumber;
     state.serialNumberStyle.number = 27;
@@ -15363,7 +15469,7 @@ void serialNumberNumericTypeEditorPreservesValuesAndRetranslates() {
     require(group->button(0)->isEnabled(), "numbered badges restore format editing");
     palette.setPhysicalScale(1.5);
     palette.setActiveTool(ScreenshotToolPalette::Tool::Text);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     group = findGroup();
     require(group->checkedId() == 4, "format survives editor recreation and DPI changes");
     auto& language = snow_shot::presentation::LanguageManager::instance();
@@ -15389,10 +15495,10 @@ void serialNumberNumericTypeEditorPreservesValuesAndRetranslates() {
     }
 }
 
-void serialNumberStyleControlsExposeAndEmitRequestedProperties() {
+void sequenceNumberStyleControlsExposeAndEmitRequestedProperties() {
     ScreenshotToolPalette::Options options;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     ScreenshotToolPalette palette(options);
     require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::Text),
             "text controls should materialize for the shared-editor comparison");
@@ -15447,7 +15553,7 @@ void serialNumberStyleControlsExposeAndEmitRequestedProperties() {
     const int textFillPresetsCount = textFillPresetsBeforeSwitch->layout() != nullptr
                                          ? textFillPresetsBeforeSwitch->layout()->count()
                                          : -1;
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     palette.show();
     QCoreApplication::processEvents();
 
@@ -15503,14 +15609,14 @@ void serialNumberStyleControlsExposeAndEmitRequestedProperties() {
     QWidget* solidFill = controlWithTooltip(palette, "Solid sequence number background");
     QWidget* crossLineFill = controlWithTooltip(palette, "Crosshatched sequence number background");
     QWidget* lineFill = controlWithTooltip(palette, "Hatched sequence number background");
-    QLayout* serialNumberLayout = controls->layout();
+    QLayout* sequenceNumberLayout = controls->layout();
     QWidget* colorRoot = styleEditorRoot(controls, "foreground-color");
     QWidget* typeRoot = styleEditorRoot(controls, "serial-type");
     QWidget* fontRoot = styleEditorRoot(controls, "text-font");
     QWidget* fillRoot = styleEditorRoot(controls, "text-fill");
     QLayout* colorLayout = colorRoot != nullptr ? colorRoot->layout() : nullptr;
     QLayout* fillLayout = fillRoot != nullptr ? fillRoot->layout() : nullptr;
-    require(serialNumberLayout != nullptr && colorRoot != nullptr && colorLayout != nullptr &&
+    require(sequenceNumberLayout != nullptr && colorRoot != nullptr && colorLayout != nullptr &&
                 colorLayout->indexOf(colorPicker) == 0,
             "sequence-number color picker should lead its color presets");
     const QStringList colorPresetTooltips{
@@ -15533,14 +15639,14 @@ void serialNumberStyleControlsExposeAndEmitRequestedProperties() {
                 adqt::icons::describeIcon(numberInput->prefixIconRef()).key.name ==
                     adqt::icons::describeIcon(adqt::icons::antd::outlined::Number()).key.name,
             "sequence number should be an underlined input with its existing icon as a prefix");
-    const int numberEditorIndex = serialNumberLayout->indexOf(numberEditor);
+    const int numberEditorIndex = sequenceNumberLayout->indexOf(numberEditor);
     auto* fontSizeSummary = controlWithTooltip(palette, "Current sequence number font size");
     require(fontSizeSummary != nullptr &&
                 fontSizeSummary->accessibleDescription() == QStringLiteral("30px"),
             "sequence-number font size should display the current value");
     require(numberEditorIndex >= 0 && fontRoot != nullptr &&
                 fontRoot->isAncestorOf(fontSizeSummary) &&
-                hasOnlySpacingBetween(serialNumberLayout, numberEditor, fontRoot, 4),
+                hasOnlySpacingBetween(sequenceNumberLayout, numberEditor, fontRoot, 4),
             "sequence number should have 4px spacing on its right");
     auto* fontSelect = qobject_cast<adqt::widgets::AdSelect*>(
         controlWithAccessibleName(palette, "Sequence number font family"));
@@ -15553,37 +15659,40 @@ void serialNumberStyleControlsExposeAndEmitRequestedProperties() {
         controls->findChildren<QFrame*>(QString(), Qt::FindDirectChildrenOnly);
     auto* typeGroup =
         typeRoot != nullptr ? typeRoot->findChild<adqt::widgets::AdRadioButtonGroup*>() : nullptr;
-    require(
-        separators.size() == 4 && numericRoot != nullptr && typeRoot != nullptr &&
-            typeGroup != nullptr &&
-            controlWithTooltip(palette, "Sequence number type") == typeRoot &&
-            controlWithTooltip(palette, "Outlined circle") != nullptr &&
-            controlWithTooltip(palette, "Solid circle") != nullptr &&
-            controlWithTooltip(palette, "Outlined square") != nullptr &&
-            controlWithTooltip(palette, "Solid square") != nullptr &&
-            serialNumberLayout->indexOf(colorRoot) <
-                serialNumberLayout->indexOf(separators.at(0)) &&
-            serialNumberLayout->indexOf(separators.at(0)) < serialNumberLayout->indexOf(typeRoot) &&
-            serialNumberLayout->indexOf(typeRoot) < serialNumberLayout->indexOf(separators.at(1)) &&
-            serialNumberLayout->indexOf(separators.at(1)) <
-                serialNumberLayout->indexOf(numericRoot) &&
-            serialNumberLayout->indexOf(numericRoot) <
-                serialNumberLayout->indexOf(separators.at(2)) &&
-            serialNumberLayout->indexOf(separators.at(2)) < numberEditorIndex &&
-            serialNumberLayout->indexOf(fontRoot) < serialNumberLayout->indexOf(separators.at(3)) &&
-            serialNumberLayout->indexOf(separators.at(3)) < serialNumberLayout->indexOf(fillRoot) &&
-            fillRoot != nullptr && fillLayout != nullptr &&
-            fillRoot->isAncestorOf(fillColorPicker) && borderFill != nullptr &&
-            solidFill != nullptr && crossLineFill != nullptr && lineFill != nullptr &&
-            layoutWidgetIndex(fillLayout, borderFill) ==
-                layoutWidgetIndex(fillLayout, fillColorPicker) + 1 &&
-            layoutWidgetIndex(fillLayout, solidFill) ==
-                layoutWidgetIndex(fillLayout, fillColorPicker) + 2 &&
-            layoutWidgetIndex(fillLayout, crossLineFill) ==
-                layoutWidgetIndex(fillLayout, fillColorPicker) + 3 &&
-            layoutWidgetIndex(fillLayout, lineFill) ==
-                layoutWidgetIndex(fillLayout, fillColorPicker) + 4,
-        "sequence-number color, type, content, and fill groups should use separators");
+    require(separators.size() == 4 && numericRoot != nullptr && typeRoot != nullptr &&
+                typeGroup != nullptr &&
+                controlWithTooltip(palette, "Sequence number type") == typeRoot &&
+                controlWithTooltip(palette, "Outlined circle") != nullptr &&
+                controlWithTooltip(palette, "Solid circle") != nullptr &&
+                controlWithTooltip(palette, "Outlined square") != nullptr &&
+                controlWithTooltip(palette, "Solid square") != nullptr &&
+                sequenceNumberLayout->indexOf(colorRoot) <
+                    sequenceNumberLayout->indexOf(separators.at(0)) &&
+                sequenceNumberLayout->indexOf(separators.at(0)) <
+                    sequenceNumberLayout->indexOf(typeRoot) &&
+                sequenceNumberLayout->indexOf(typeRoot) <
+                    sequenceNumberLayout->indexOf(separators.at(1)) &&
+                sequenceNumberLayout->indexOf(separators.at(1)) <
+                    sequenceNumberLayout->indexOf(numericRoot) &&
+                sequenceNumberLayout->indexOf(numericRoot) <
+                    sequenceNumberLayout->indexOf(separators.at(2)) &&
+                sequenceNumberLayout->indexOf(separators.at(2)) < numberEditorIndex &&
+                sequenceNumberLayout->indexOf(fontRoot) <
+                    sequenceNumberLayout->indexOf(separators.at(3)) &&
+                sequenceNumberLayout->indexOf(separators.at(3)) <
+                    sequenceNumberLayout->indexOf(fillRoot) &&
+                fillRoot != nullptr && fillLayout != nullptr &&
+                fillRoot->isAncestorOf(fillColorPicker) && borderFill != nullptr &&
+                solidFill != nullptr && crossLineFill != nullptr && lineFill != nullptr &&
+                layoutWidgetIndex(fillLayout, borderFill) ==
+                    layoutWidgetIndex(fillLayout, fillColorPicker) + 1 &&
+                layoutWidgetIndex(fillLayout, solidFill) ==
+                    layoutWidgetIndex(fillLayout, fillColorPicker) + 2 &&
+                layoutWidgetIndex(fillLayout, crossLineFill) ==
+                    layoutWidgetIndex(fillLayout, fillColorPicker) + 3 &&
+                layoutWidgetIndex(fillLayout, lineFill) ==
+                    layoutWidgetIndex(fillLayout, fillColorPicker) + 4,
+            "sequence-number color, type, content, and fill groups should use separators");
 
     SnowCanvasSerialNumberStyle emittedStyle;
     int changeCount = 0;
@@ -15662,17 +15771,17 @@ void serialNumberStyleControlsExposeAndEmitRequestedProperties() {
     auto* textFamily = controlWithAccessibleName(palette, "Text font family");
     require(textFamily != nullptr && textFamily->isEnabled(),
             "reusing Circle font controls for Text must restore the family selector");
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     auto* circleFamily = controlWithAccessibleName(palette, "Sequence number font family");
     require(circleFamily != nullptr && !circleFamily->isEnabled(),
             "returning to Circle must disable the reused font selector");
 }
 
-void serialNumberInputCommitsEditsAndSupportsWheel() {
+void sequenceNumberInputCommitsEditsAndSupportsWheel() {
     ScreenshotToolPalette::Options options;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     ScreenshotToolPalette palette(options);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     SnowCanvasStyleToolbarState state;
     state.source = SnowCanvasStyleToolbarSource::SelectedSerialNumber;
     state.serialNumberStyle.number = 12;
@@ -15780,7 +15889,7 @@ void serialNumberInputCommitsEditsAndSupportsWheel() {
     typeText(QStringLiteral("35"));
     palette.setActiveTool(ScreenshotToolPalette::Tool::Text);
     QCoreApplication::processEvents();
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     QCoreApplication::processEvents();
     input = qobject_cast<adqt::widgets::AdLineEdit*>(
         controlWithTooltip(palette, "Sequence number (scroll to adjust)"));
@@ -15794,7 +15903,7 @@ void stylePopoverTriggersProvideMouseFeedback() {
              ScreenshotToolPalette::Tool::Shape,
              ScreenshotToolPalette::Tool::Arrow,
              ScreenshotToolPalette::Tool::Text,
-             ScreenshotToolPalette::Tool::SerialNumber,
+             ScreenshotToolPalette::Tool::SequenceNumber,
          }) {
         require(palette.ensureStyleFamily(tool),
                 "the popup-feedback test should materialize each inspected style family");
@@ -15886,13 +15995,13 @@ void stylePopoverTriggersProvideMouseFeedback() {
     require(!fontSelect->accessibleName().isEmpty(),
             "text font-family popup trigger should retain an accessible name");
 
-    auto* serialNumberFontSelect = qobject_cast<adqt::widgets::AdSelect*>(
+    auto* sequenceNumberFontSelect = qobject_cast<adqt::widgets::AdSelect*>(
         controlWithAccessibleName(palette, "Sequence number font family"));
-    require(serialNumberFontSelect != nullptr,
+    require(sequenceNumberFontSelect != nullptr,
             "sequence number font-family popup trigger should exist");
-    require(serialNumberFontSelect->toolTip().isEmpty(),
+    require(sequenceNumberFontSelect->toolTip().isEmpty(),
             "sequence number font-family popup trigger should not show a tooltip");
-    require(!serialNumberFontSelect->accessibleName().isEmpty(),
+    require(!sequenceNumberFontSelect->accessibleName().isEmpty(),
             "sequence number font-family trigger should retain an accessible name");
 }
 
@@ -16108,15 +16217,15 @@ void borderFillControlsRetainColorAndSavedPreferences() {
     }
 
     using Tool = ScreenshotToolPalette::Tool;
-    for (auto tool : {Tool::Shape, Tool::SpeechBubble, Tool::Line, Tool::FreeDraw, Tool::Text,
-                      Tool::SerialNumber}) {
+    for (auto tool : {Tool::Shape, Tool::SpeechBubble, Tool::Line, Tool::Brush, Tool::Text,
+                      Tool::SequenceNumber}) {
         ScreenshotToolPalette::Options options;
         options.showTextTool = true;
-        options.showSerialNumberTool = true;
+        options.showSequenceNumberTool = true;
         ScreenshotToolPalette palette(options);
         palette.setActiveTool(tool);
         const bool text = tool == Tool::Text;
-        const bool serial = tool == Tool::SerialNumber;
+        const bool serial = tool == Tool::SequenceNumber;
         auto* picker =
             colorPickerWithAccessibleName(palette, text     ? "Text background color"
                                                    : serial ? "Sequence number background color"
@@ -16517,10 +16626,10 @@ void styleToolbarRowSpacingFollowsPhysicalScale() {
         {ScreenshotToolPalette::Tool::Arrow, QStringLiteral("screenshotArrowStyleControls")},
         {ScreenshotToolPalette::Tool::RectangleHighlight,
          QStringLiteral("screenshotHighlightStyleControls")},
-        {ScreenshotToolPalette::Tool::PenHighlight,
+        {ScreenshotToolPalette::Tool::BrushHighlight,
          QStringLiteral("screenshotPenHighlightStyleControls")},
         {ScreenshotToolPalette::Tool::Text, QStringLiteral("screenshotTextStyleControls")},
-        {ScreenshotToolPalette::Tool::SerialNumber,
+        {ScreenshotToolPalette::Tool::SequenceNumber,
          QStringLiteral("screenshotSerialNumberStyleControls")},
         {ScreenshotToolPalette::Tool::RectangleFilter,
          QStringLiteral("screenshotFilterStyleControls")},
@@ -16557,11 +16666,11 @@ void styleToolbarControlsDoNotEnterTabFocusChain() {
              ScreenshotToolPalette::Tool::Shape,
              ScreenshotToolPalette::Tool::Arrow,
              ScreenshotToolPalette::Tool::RectangleHighlight,
-             ScreenshotToolPalette::Tool::PenHighlight,
+             ScreenshotToolPalette::Tool::BrushHighlight,
              ScreenshotToolPalette::Tool::Text,
-             ScreenshotToolPalette::Tool::SerialNumber,
+             ScreenshotToolPalette::Tool::SequenceNumber,
              ScreenshotToolPalette::Tool::RectangleFilter,
-             ScreenshotToolPalette::Tool::PenFilter,
+             ScreenshotToolPalette::Tool::BrushFilter,
              ScreenshotToolPalette::Tool::Spotlight,
              ScreenshotToolPalette::Tool::Watermark,
          }) {
@@ -17285,14 +17394,14 @@ void repeatedToolsAndDifferentialStyleSynchronizationAreNoOps() {
     options.showShapeTool = true;
     options.showArrowTool = true;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showRectangleHighlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.showEraserTool = true;
     options.showFilterTool = true;
     options.showWatermarkTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showOcrTool = true;
     options.showScrollingScreenshotTool = true;
     ScreenshotToolPalette palette(options);
@@ -17302,14 +17411,14 @@ void repeatedToolsAndDifferentialStyleSynchronizationAreNoOps() {
         ScreenshotToolPalette::Tool::Shape,
         ScreenshotToolPalette::Tool::Arrow,
         ScreenshotToolPalette::Tool::Line,
-        ScreenshotToolPalette::Tool::FreeDraw,
+        ScreenshotToolPalette::Tool::Brush,
         ScreenshotToolPalette::Tool::RectangleHighlight,
-        ScreenshotToolPalette::Tool::PenHighlight,
+        ScreenshotToolPalette::Tool::BrushHighlight,
         ScreenshotToolPalette::Tool::Eraser,
         ScreenshotToolPalette::Tool::Filter,
         ScreenshotToolPalette::Tool::Watermark,
         ScreenshotToolPalette::Tool::Text,
-        ScreenshotToolPalette::Tool::SerialNumber,
+        ScreenshotToolPalette::Tool::SequenceNumber,
         ScreenshotToolPalette::Tool::Ocr,
         ScreenshotToolPalette::Tool::ScrollingScreenshot,
     };
@@ -17333,12 +17442,12 @@ void repeatedToolsAndDifferentialStyleSynchronizationAreNoOps() {
     palette.setActiveTool(ScreenshotToolPalette::Tool::RectangleHighlight);
     static_cast<void>(palette.contentSizeHint());
     const quint64 beforePen = palette.layoutCommitCountForTests();
-    palette.setActiveTool(ScreenshotToolPalette::Tool::PenHighlight);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::BrushHighlight);
     static_cast<void>(palette.contentSizeHint());
     require(palette.layoutCommitCountForTests() - beforePen <= 1,
             "pen highlight should require at most one committed layout");
     const quint64 afterPen = palette.layoutCommitCountForTests();
-    palette.setActiveTool(ScreenshotToolPalette::Tool::PenHighlight);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::BrushHighlight);
     static_cast<void>(palette.contentSizeHint());
     require(palette.layoutCommitCountForTests() == afterPen,
             "repeating pen highlight should commit no layout");
@@ -17380,15 +17489,15 @@ void editorlessToolsRejectStaleStyleToolbarState() {
     options.showShapeTool = true;
     options.showArrowTool = true;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showRectangleHighlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.showSpotlightTool = true;
     options.showEraserTool = true;
     options.showFilterTool = true;
     options.showWatermarkTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showOcrTool = true;
     options.showScrollingScreenshotTool = true;
     ScreenshotToolPalette palette(options);
@@ -17402,18 +17511,18 @@ void editorlessToolsRejectStaleStyleToolbarState() {
         {ScreenshotToolPalette::Tool::Arrow, SnowCanvasStyleToolbarSource::DefaultArrow},
         {ScreenshotToolPalette::Tool::Distance, SnowCanvasStyleToolbarSource::DefaultDistance},
         {ScreenshotToolPalette::Tool::Line, SnowCanvasStyleToolbarSource::DefaultLine},
-        {ScreenshotToolPalette::Tool::FreeDraw, SnowCanvasStyleToolbarSource::DefaultFreeDraw},
+        {ScreenshotToolPalette::Tool::Brush, SnowCanvasStyleToolbarSource::DefaultFreeDraw},
         {ScreenshotToolPalette::Tool::RectangleHighlight,
          SnowCanvasStyleToolbarSource::DefaultRectangleHighlight},
-        {ScreenshotToolPalette::Tool::PenHighlight,
+        {ScreenshotToolPalette::Tool::BrushHighlight,
          SnowCanvasStyleToolbarSource::DefaultPenHighlight},
         {ScreenshotToolPalette::Tool::Spotlight, SnowCanvasStyleToolbarSource::DefaultSpotlight},
         {ScreenshotToolPalette::Tool::RectangleFilter,
          SnowCanvasStyleToolbarSource::DefaultRectangleFilter},
-        {ScreenshotToolPalette::Tool::PenFilter, SnowCanvasStyleToolbarSource::DefaultPenFilter},
+        {ScreenshotToolPalette::Tool::BrushFilter, SnowCanvasStyleToolbarSource::DefaultPenFilter},
         {ScreenshotToolPalette::Tool::Watermark, SnowCanvasStyleToolbarSource::Watermark},
         {ScreenshotToolPalette::Tool::Text, SnowCanvasStyleToolbarSource::DefaultText},
-        {ScreenshotToolPalette::Tool::SerialNumber,
+        {ScreenshotToolPalette::Tool::SequenceNumber,
          SnowCanvasStyleToolbarSource::DefaultSerialNumber},
     };
     static const ScreenshotToolPalette::Tool editorlessTools[] = {
@@ -17454,9 +17563,9 @@ void editorlessToolsRejectStaleStyleToolbarState() {
 void crossTypeSelectionRecalculatesStyleToolbarSize() {
     ScreenshotToolPalette::Options options;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     ScreenshotToolPalette palette(options);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     require(palette.ensureStyleFamily(ScreenshotToolPalette::Tool::Text),
             "cross-type selection test should materialize the inspected text editor");
 
@@ -17673,7 +17782,7 @@ void activeFilterAndWatermarkToolsExposeCanvasWheelSteps() {
                 filterProperties == SnowCanvasFilterStylePropertyStrength &&
                 qFuzzyCompare(changedFilter.strength + 1.0, 1.51),
             "active Rectangle Filter canvas wheel steps should increase intensity by one percent");
-    require(!palette.stepPenFilterStrokeWidth(1) && !palette.stepWatermarkFontSize(1),
+    require(!palette.stepBrushFilterStrokeWidth(1) && !palette.stepWatermarkFontSize(1),
             "inactive canvas wheel parameter handlers should reject input");
 
     rectangleState.filterStyle.strength = 1.0;
@@ -17695,8 +17804,8 @@ void activeFilterAndWatermarkToolsExposeCanvasWheelSteps() {
     penState.filterStyle.opacity = 1.0;
     penState.filterStyle.strokeWidth = 42.0;
     palette.setStyleToolbarState(penState);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::PenFilter);
-    require(palette.stepPenFilterStrokeWidth(-1) && filterChanges == 2 &&
+    palette.setActiveTool(ScreenshotToolPalette::Tool::BrushFilter);
+    require(palette.stepBrushFilterStrokeWidth(-1) && filterChanges == 2 &&
                 filterProperties == SnowCanvasFilterStylePropertyStrokeWidth &&
                 changedFilter.strokeWidth == 41.0,
             "active Pen Filter canvas wheel steps should change stroke width by one pixel");
@@ -17704,7 +17813,7 @@ void activeFilterAndWatermarkToolsExposeCanvasWheelSteps() {
     penState.filterStyle.strokeWidth = 72.0;
     palette.setStyleToolbarState(penState);
     const int changesAtPenMaximum = filterChanges;
-    require(palette.stepPenFilterStrokeWidth(1) && filterChanges == changesAtPenMaximum,
+    require(palette.stepBrushFilterStrokeWidth(1) && filterChanges == changesAtPenMaximum,
             "Pen Filter should consume canvas wheel input without emitting past its upper clamp");
 
     SnowCanvasWatermarkConfig watermark;
@@ -17721,7 +17830,7 @@ void activeFilterAndWatermarkToolsExposeCanvasWheelSteps() {
     require(palette.stepWatermarkFontSize(1) && watermarkChanges == 1 &&
                 changedWatermark.fontSize == 19.0,
             "active Watermark canvas wheel steps should change font size by one pixel");
-    require(!palette.stepFilterIntensity(1) && !palette.stepPenFilterStrokeWidth(1),
+    require(!palette.stepFilterIntensity(1) && !palette.stepBrushFilterStrokeWidth(1),
             "filter canvas wheel handlers should reject input while Watermark is active");
 }
 
@@ -17836,12 +17945,12 @@ void resetStyleStateRestoresTheCompleteInjectedProfileWithoutCommands() {
     options.showShapeTool = true;
     options.showArrowTool = true;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showRectangleHighlightTool = true;
-    options.showPenHighlightTool = true;
+    options.showBrushHighlightTool = true;
     options.showFilterTool = true;
     options.showTextTool = true;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showWatermarkTool = true;
     options.showSpotlightTool = true;
     options.styleDefaults = snow_shot::presentation::screenshotCanvasStyleDefaults();
@@ -17930,21 +18039,21 @@ void selectToolRemainsTheSoleOwnerOfItsSecondaryToolbar() {
     options.showWatermarkTool = true;
     ScreenshotToolPalette palette(options);
 
-    SnowCanvasStyleToolbarState penFilterState;
-    penFilterState.source = SnowCanvasStyleToolbarSource::DefaultPenFilter;
-    penFilterState.filterStyle.type = SnowCanvasFilterType::Mosaic;
-    penFilterState.filterStyle.strength = 0.5;
-    penFilterState.filterStyle.opacity = 1.0;
-    penFilterState.filterStyle.strokeWidth = 42.0;
-    palette.setActiveTool(ScreenshotToolPalette::Tool::PenFilter);
-    palette.setStyleToolbarState(penFilterState);
+    SnowCanvasStyleToolbarState brushFilterState;
+    brushFilterState.source = SnowCanvasStyleToolbarSource::DefaultPenFilter;
+    brushFilterState.filterStyle.type = SnowCanvasFilterType::Mosaic;
+    brushFilterState.filterStyle.strength = 0.5;
+    brushFilterState.filterStyle.opacity = 1.0;
+    brushFilterState.filterStyle.strokeWidth = 42.0;
+    palette.setActiveTool(ScreenshotToolPalette::Tool::BrushFilter);
+    palette.setStyleToolbarState(brushFilterState);
     require(palette.styleToolbarVisible() && !palette.actionToolbarVisible(),
             "Pen Filter should initially own the style toolbar");
 
     palette.setActiveTool(ScreenshotToolPalette::Tool::Select);
-    penFilterState.source = SnowCanvasStyleToolbarSource::SelectedPenFilter;
-    penFilterState.filterStyle.opacity = 0.65;
-    palette.setStyleToolbarState(penFilterState);
+    brushFilterState.source = SnowCanvasStyleToolbarSource::SelectedPenFilter;
+    brushFilterState.filterStyle.opacity = 0.65;
+    palette.setStyleToolbarState(brushFilterState);
     require(palette.actionToolbarVisible() && !palette.styleToolbarVisible(),
             "selecting a pen-filter element must preserve the selection toolbar");
     require(!palette.actionPanel()->isHidden() && palette.stylePanel()->isHidden(),
@@ -18099,7 +18208,7 @@ void drawingColorsPreserveAlphaAcrossEditsAndToolSwitches() {
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.rectangle.fill; }},
         {Tool::Line, "Stroke color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.line.stroke; }},
-        {Tool::FreeDraw, "Stroke color",
+        {Tool::Brush, "Stroke color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.freeDraw.stroke; }},
         {Tool::Arrow, "Arrow color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.arrow.stroke; }},
@@ -18109,7 +18218,7 @@ void drawingColorsPreserveAlphaAcrossEditsAndToolSwitches() {
          [](SnowCanvasStyleDefaults& styles) -> QColor& {
              return styles.rectangleHighlight.stroke;
          }},
-        {Tool::PenHighlight, "Pen highlight color",
+        {Tool::BrushHighlight, "Brush highlight color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.penHighlight.stroke; }},
         {Tool::Text, "Text color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.text.color; }},
@@ -18117,9 +18226,9 @@ void drawingColorsPreserveAlphaAcrossEditsAndToolSwitches() {
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.text.stroke; }},
         {Tool::Text, "Text background color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.text.fill; }},
-        {Tool::SerialNumber, "Sequence number color",
+        {Tool::SequenceNumber, "Sequence number color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.serialNumber.color; }},
-        {Tool::SerialNumber, "Sequence number background color",
+        {Tool::SequenceNumber, "Sequence number background color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.serialNumber.fill; }},
         {Tool::Spotlight, "Mask color",
          [](SnowCanvasStyleDefaults& styles) -> QColor& { return styles.spotlight.color; }},
@@ -18129,7 +18238,7 @@ void drawingColorsPreserveAlphaAcrossEditsAndToolSwitches() {
     for (const auto& test : cases) {
         ScreenshotToolPalette::Options options;
         options.showTextTool = true;
-        options.showSerialNumberTool = true;
+        options.showSequenceNumberTool = true;
         test.color(options.styleDefaults) = QColor(23, 67, 109, 0);
         ScreenshotToolPalette palette(options);
         palette.setActiveTool(test.tool);
@@ -18203,7 +18312,7 @@ void strokeRenderingControlsPreserveIndependentToolStyles() {
             "Architect should remain the default for each supported tool");
     ScreenshotToolPalette::Options options;
     options.showLineTool = true;
-    options.showFreeDrawTool = true;
+    options.showBrushTool = true;
     options.showSpeechBubbleTool = true;
     options.styleDefaults = product;
     ScreenshotToolPalette palette(options);
@@ -18261,7 +18370,7 @@ void strokeRenderingControlsPreserveIndependentToolStyles() {
     }
     for (int pass = 0; pass < 2; ++pass) {
         for (const auto tool :
-             {Tool::FreeDraw, Tool::SpeechBubble, Tool::Shape, Tool::Arrow, Tool::Line}) {
+             {Tool::Brush, Tool::SpeechBubble, Tool::Shape, Tool::Arrow, Tool::Line}) {
             QWidget* row = openStrokeRenderingRow(palette, tool);
             const auto buttons = strokeRenderingButtons(row);
             const bool supported = tool == Tool::Shape || tool == Tool::SpeechBubble ||
@@ -18288,15 +18397,15 @@ void strokeRenderingControlsPreserveIndependentToolStyles() {
             "reconciliation should preserve each tool's rendering and pattern choices");
 }
 
-void serialNumberStrokeRenderingControlsRespectBadgeTypes() {
+void sequenceNumberStrokeRenderingControlsRespectBadgeTypes() {
     using Tool = ScreenshotToolPalette::Tool;
     using Rendering = SnowCanvasStrokeRenderingStyle;
     ScreenshotToolPalette::Options options;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showTextTool = true;
     options.styleDefaults = snow_shot::presentation::screenshotCanvasStyleDefaults();
     ScreenshotToolPalette palette(options);
-    palette.setActiveTool(Tool::SerialNumber);
+    palette.setActiveTool(Tool::SequenceNumber);
     palette.show();
     QApplication::processEvents();
     SnowCanvasStyleToolbarState state;
@@ -18362,7 +18471,7 @@ void serialNumberStrokeRenderingControlsRespectBadgeTypes() {
                         : nullptr;
         require(row == nullptr || row->isHidden(), "reused text color pickers hide stroke types");
         picker->setPopupVisible(false);
-        palette.setActiveTool(Tool::SerialNumber);
+        palette.setActiveTool(Tool::SequenceNumber);
     }
 }
 
@@ -19065,17 +19174,17 @@ void canvasToolStylesPersistIndependentlyWithoutGlobalStyles() {
             "typed serial-number settings should restore the saved appearance");
 
     ScreenshotToolPalette::Options options;
-    options.showSerialNumberTool = true;
+    options.showSequenceNumberTool = true;
     options.showTextTool = true;
     options.styleDefaults = snow_shot::presentation::screenshotCanvasToolStyleDefaults();
     ScreenshotToolPalette palette(options);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     SnowCanvasStyleToolbarState state;
     state.source = SnowCanvasStyleToolbarSource::DefaultSerialNumber;
     state.serialNumberStyle = styles.serialNumber;
     palette.setStyleToolbarState(state);
     palette.setActiveTool(ScreenshotToolPalette::Tool::Text);
-    palette.setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
+    palette.setActiveTool(ScreenshotToolPalette::Tool::SequenceNumber);
     require(palette.creationStyleDefaults().serialNumber == styles.serialNumber,
             "switching tools should retain the current session's serial number");
     require(
@@ -19487,13 +19596,13 @@ void autoFilterLegacyStrengthMigration() {
 
 void filterEditorsRestoreValuesAfterToolSwitch() {
     using Tool = ScreenshotToolPalette::Tool;
-    for (const Tool tool : {Tool::RectangleFilter, Tool::PenFilter, Tool::AutoFilter}) {
+    for (const Tool tool : {Tool::RectangleFilter, Tool::BrushFilter, Tool::AutoFilter}) {
         ScreenshotToolPalette::Options options;
         options.showFilterTool = true;
         ScreenshotToolPalette palette(options);
         palette.setActiveTool(tool);
         SnowCanvasStyleToolbarState state;
-        state.source = tool == Tool::PenFilter
+        state.source = tool == Tool::BrushFilter
                            ? SnowCanvasStyleToolbarSource::DefaultPenFilter
                            : SnowCanvasStyleToolbarSource::DefaultRectangleFilter;
         int edits = 0;
@@ -19509,7 +19618,7 @@ void filterEditorsRestoreValuesAfterToolSwitch() {
                 palette.setActiveTool(tool);
                 palette.setStyleToolbarState(state);
                 const QString prefix =
-                    tool == Tool::PenFilter    ? QStringLiteral("screenshotPenFilter")
+                    tool == Tool::BrushFilter  ? QStringLiteral("screenshotPenFilter")
                     : tool == Tool::AutoFilter ? QStringLiteral("screenshotAutoFilter")
                                                : QStringLiteral("screenshotFilter");
                 auto* select = palette.findChild<adqt::widgets::AdSelect*>(
@@ -19583,7 +19692,7 @@ void filterTypeSelectKeepsSmartEraseAcrossFilterModeSwitches() {
     requireSmartErase(QStringLiteral("screenshotFilterTypeSelect"));
 
     palette.setActiveTool(Tool::AutoFilter);
-    palette.setActiveTool(Tool::PenFilter);
+    palette.setActiveTool(Tool::BrushFilter);
     adqt::widgets::AdSelect* penType =
         requireSmartErase(QStringLiteral("screenshotPenFilterTypeSelect"));
 
@@ -19618,11 +19727,11 @@ void autoFilterControlsShareStylesAndKeepCategoryUnselected() {
     QObject::connect(&canvas, &SnowCanvasWidget::styleToolbarStateChanged, &palette,
                      [&]() { palette.setStyleToolbarState(canvas.canvasStyleToolbarState()); });
     for (const Tool tool :
-         {Tool::AutoFilter, Tool::RectangleFilter, Tool::PenFilter, Tool::AutoFilter}) {
+         {Tool::AutoFilter, Tool::RectangleFilter, Tool::BrushFilter, Tool::AutoFilter}) {
         palette.setActiveTool(tool);
-        canvas.setCanvasTool(tool == Tool::AutoFilter  ? SnowCanvasTool::AutoFilter
-                             : tool == Tool::PenFilter ? SnowCanvasTool::PenFilter
-                                                       : SnowCanvasTool::RectangleFilter);
+        canvas.setCanvasTool(tool == Tool::AutoFilter    ? SnowCanvasTool::AutoFilter
+                             : tool == Tool::BrushFilter ? SnowCanvasTool::PenFilter
+                                                         : SnowCanvasTool::RectangleFilter);
         palette.setStyleToolbarState(canvas.canvasStyleToolbarState());
     }
     auto* controls =
@@ -19843,7 +19952,7 @@ void moveToolExposesCaptureCursorAndRecaptureOptions() {
         require(language.setLanguage(locale), "unit tooltip catalogs must load");
         QCoreApplication::processEvents();
         const auto tooltip =
-            QCoreApplication::translate("ScreenshotToolPalette", "Logical Pixel Selection");
+            QCoreApplication::translate("ScreenshotToolPalette", "Logical pixel selection");
         require(unitGroup->button(1)->toolTip() == tooltip &&
                     unitGroup->button(1)->accessibleName() == tooltip,
                 "unit tooltips and accessible names must retranslate live");
@@ -20303,7 +20412,7 @@ void runScreenshotStyleBindingTests();
 void runScreenshotTextAlignmentTests();
 void runAngleStyleBindingTests();
 void runBracketStyleBindingTests();
-void runScreenshotSerialNumberRestartTests();
+void runScreenshotSequenceNumberRestartTests();
 void runScreenshotStylePersistenceFailureTest();
 void runWatermarkPersistenceTests();
 
@@ -20596,14 +20705,14 @@ int main(int argc, char** argv) {
     if (application.arguments().contains(QStringLiteral("--pressure-brush-only"))) {
         pressureBrushToolbarPreservesStylesAndMixedSelection();
         pressureBrushPreferencePersistsAndRejectsUnknownValues();
-        freeDrawToolIsDistinctAndUsesIndependentPathStyleControls();
+        brushToolIsDistinctAndUsesIndependentPathStyleControls();
         return 0;
     }
     if (application.arguments().contains(QStringLiteral("--eraser-only"))) {
         eraserResetRemainsAvailableWithoutSelection();
         eraserStyleToolbarHeightMatchesOtherTools();
         eraserToolsExposeRememberedModesAndIndependentWidth();
-        recordingEraserActivationReturnsToSelect();
+        recordingEraserActivationReturnsToExportSettings();
         return 0;
     }
     if (application.arguments().contains(QStringLiteral("--watermark-persistence-only"))) {
@@ -20617,8 +20726,8 @@ int main(int argc, char** argv) {
         arrowStyleControlsExposeAndEmitAllStyleProperties();
         selectedArrowMixedPropertiesResolveIndependently();
         lineStyleControlsExposeStraightAndCurveTypes();
-        serialNumberStyleControlsExposeAndEmitRequestedProperties();
-        serialNumberInputCommitsEditsAndSupportsWheel();
+        sequenceNumberStyleControlsExposeAndEmitRequestedProperties();
+        sequenceNumberInputCommitsEditsAndSupportsWheel();
         watermarkToolExposesSharedStyleControls();
         activeFilterAndWatermarkToolsExposeCanvasWheelSteps();
         selectedFilterTypeRemembersOnlyTheEditedProperty();
@@ -20627,11 +20736,11 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (application.arguments().contains(QStringLiteral("--serial-number-only"))) {
-        runScreenshotSerialNumberRestartTests();
-        serialNumberCreationValuesAreIndependentPerNumericType();
-        serialNumberNumericTypeEditorPreservesValuesAndRetranslates();
-        serialNumberStyleControlsExposeAndEmitRequestedProperties();
-        serialNumberInputCommitsEditsAndSupportsWheel();
+        runScreenshotSequenceNumberRestartTests();
+        sequenceNumberCreationValuesAreIndependentPerNumericType();
+        sequenceNumberNumericTypeEditorPreservesValuesAndRetranslates();
+        sequenceNumberStyleControlsExposeAndEmitRequestedProperties();
+        sequenceNumberInputCommitsEditsAndSupportsWheel();
         canvasToolStylesPersistIndependentlyWithoutGlobalStyles();
         return 0;
     }
@@ -20712,8 +20821,9 @@ int main(int argc, char** argv) {
         canvasToolBindingsRespectCapabilitiesAndLifetime();
         screenshotShortcutsShareButtonCommandsAndAvailability();
         clickingActiveToolbarToolReturnsToSelect();
+        repeatedToolsReturnToTheirToolbarDefault();
         repeatingDrawingShortcutsReturnsToSelect();
-        repeatingActionShortcutsReturnsToSelect();
+        repeatingActionShortcutsReturnsToDefault();
         groupedToolShortcutsToggleOnlyTheRequestedTool();
         return 0;
     }
@@ -20874,7 +20984,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (application.arguments().contains(QStringLiteral("--stroke-rendering-only"))) {
-        serialNumberStrokeRenderingControlsRespectBadgeTypes();
+        sequenceNumberStrokeRenderingControlsRespectBadgeTypes();
         strokeRenderingControlsPreserveIndependentToolStyles();
         strokeRenderingMixedSelectionResolvesOneProperty();
         strokeRenderingPreferencesRoundTripAndRejectUnknownValues();
@@ -21075,9 +21185,10 @@ int main(int argc, char** argv) {
     ocrControlReflectsLoadingState();
     ocrToolReplacesSelectionActionToolbarContents();
     clickingActiveToolbarToolReturnsToSelect();
+    repeatedToolsReturnToTheirToolbarDefault();
     screenshotShortcutsShareButtonCommandsAndAvailability();
     repeatingDrawingShortcutsReturnsToSelect();
-    repeatingActionShortcutsReturnsToSelect();
+    repeatingActionShortcutsReturnsToDefault();
     groupedToolShortcutsToggleOnlyTheRequestedTool();
     tableToolExposesStructureActionsAndOwnHistoryState();
     toolbarGroupCommandsCanReplaceTheirOwningPopover();
@@ -21097,14 +21208,14 @@ int main(int argc, char** argv) {
     lineToolIsDiscoverableSelectableAndUsesLinearStyleControls();
     pressureBrushToolbarPreservesStylesAndMixedSelection();
     pressureBrushPreferencePersistsAndRejectsUnknownValues();
-    freeDrawToolIsDistinctAndUsesIndependentPathStyleControls();
+    brushToolIsDistinctAndUsesIndependentPathStyleControls();
     highlightVariantsUseConfiguredPopoverGroup();
     drawingToolbarGroupsUseToolbarPopoverMetrics();
     spotlightControlsMatchMaskConfigurationBehavior();
     highlightStyleToolbarWidthTracksActiveMode();
     eraserStyleToolbarHeightMatchesOtherTools();
     eraserToolsExposeRememberedModesAndIndependentWidth();
-    recordingEraserActivationReturnsToSelect();
+    recordingEraserActivationReturnsToExportSettings();
     filterEditorsRestoreValuesAfterToolSwitch();
     filterTypeSelectKeepsSmartEraseAcrossFilterModeSwitches();
     filterToolExposesTypeAndIntensityControls();
@@ -21148,10 +21259,10 @@ int main(int argc, char** argv) {
     selectedArrowMixedPropertiesResolveIndependently();
     textEmphasisButtonsToggleMixedStylesAndSurviveReuse();
     textStyleControlsExposeAndEmitAllRequestedProperties();
-    serialNumberCreationValuesAreIndependentPerNumericType();
-    serialNumberNumericTypeEditorPreservesValuesAndRetranslates();
-    serialNumberStyleControlsExposeAndEmitRequestedProperties();
-    serialNumberInputCommitsEditsAndSupportsWheel();
+    sequenceNumberCreationValuesAreIndependentPerNumericType();
+    sequenceNumberNumericTypeEditorPreservesValuesAndRetranslates();
+    sequenceNumberStyleControlsExposeAndEmitRequestedProperties();
+    sequenceNumberInputCommitsEditsAndSupportsWheel();
     stylePopoverTriggersProvideMouseFeedback();
     cornerRadiusButtonsRestoreTheDefaultValue();
     colorSamplerStopsWhenPopupClosureRetiresItsEditor();
@@ -21180,7 +21291,7 @@ int main(int argc, char** argv) {
     tableQrEntrySelectionPersistsAcrossPaletteInstances();
     drawingColorsPreserveAlphaAcrossEditsAndToolSwitches();
     canvasToolStylesPersistIndependentlyWithoutGlobalStyles();
-    serialNumberStrokeRenderingControlsRespectBadgeTypes();
+    sequenceNumberStrokeRenderingControlsRespectBadgeTypes();
     strokeRenderingControlsPreserveIndependentToolStyles();
     strokeRenderingMixedSelectionResolvesOneProperty();
     strokeRenderingPreferencesRoundTripAndRejectUnknownValues();
